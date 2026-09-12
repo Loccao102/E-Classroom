@@ -90,8 +90,6 @@ services:
         condition: service_healthy
       nats:
         condition: service_healthy
-      core-api:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8090/ready"]
       interval: 10s
