@@ -1,18 +1,27 @@
 package com.eclassroom.core;
 
 import com.eclassroom.core.identity.AccessService;
+import com.eclassroom.core.identity.AuthService;
 import com.eclassroom.core.integration.OutboxService;
 import com.eclassroom.core.shared.api.ApiException;
+import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.postgresql.ds.PGSimpleDataSource;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.oauth2.jwt.JwtEncoder;
+import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import tools.jackson.databind.json.JsonMapper;
 
+import javax.crypto.SecretKey;
+import javax.crypto.spec.SecretKeySpec;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
@@ -20,6 +29,8 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -66,6 +77,34 @@ class PlatformPostgresIntegrationTest {
         assertEquals(1, schools);
         assertEquals(1, attendance);
         assertEquals(1, outbox);
+    }
+
+    @Test
+    void loginPersistsRefreshTokenAndReturnsHs256AccessToken() {
+        String email = "login-" + UUID.randomUUID() + "@example.com";
+        String rawPassword = "StrongPass123!";
+        PasswordEncoder passwordEncoder = new BCryptPasswordEncoder(4);
+        UUID userId = UUID.randomUUID();
+        jdbc.update(
+                "INSERT INTO identity.users(id,email,password_hash,full_name,platform_role,status) VALUES (?,?,?,?,?,'ACTIVE')",
+                userId, email, passwordEncoder.encode(rawPassword), "Login Test", "SUPER_ADMIN");
+
+        byte[] secretBytes = "01234567890123456789012345678901".getBytes(StandardCharsets.UTF_8);
+        SecretKey secretKey = new SecretKeySpec(secretBytes, "HmacSHA256");
+        JwtEncoder encoder = new NimbusJwtEncoder(new ImmutableSecret<>(secretKey));
+        AuthService auth = new AuthService(jdbc, passwordEncoder, encoder, "eclassroom-test", 15, 30);
+
+        AuthService.TokenResponse tokens = auth.login(email, rawPassword);
+
+        assertFalse(tokens.accessToken().isBlank());
+        assertFalse(tokens.refreshToken().isBlank());
+        assertEquals("Bearer", tokens.tokenType());
+        Integer refreshRows = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM identity.refresh_tokens WHERE user_id=? AND revoked_at IS NULL AND expires_at>NOW()",
+                Integer.class,
+                userId);
+        assertEquals(1, refreshRows);
+        assertThrows(ApiException.class, () -> auth.login(email, "wrong-password"));
     }
 
     @Test
@@ -135,7 +174,7 @@ class PlatformPostgresIntegrationTest {
         assertTrue(payload.contains(eventId.toString()));
         assertTrue(payload.contains(recipient.toString()));
         assertTrue(payload.contains("ATTENDANCE_SESSION"));
-        assertEquals(null, row.get("published_at"));
+        assertNull(row.get("published_at"));
     }
 
     private static UUID school(String code, String name) {
