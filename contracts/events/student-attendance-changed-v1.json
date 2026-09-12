@@ -1,5 +1,6 @@
 {
   "eventId": "9b6db32a-b7a5-4e63-bb66-747b78ea7af1",
+  "correlationId": "request-2026-09-13-demo",
   "eventType": "student.attendance.changed",
   "eventVersion": 1,
   "occurredAt": "2026-09-13T00:00:00Z",
