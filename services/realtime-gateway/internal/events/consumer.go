@@ -29,9 +29,10 @@ const (
 )
 
 type Envelope struct {
-	EventID    string   `json:"eventId"`
-	EventType  string   `json:"eventType"`
-	Recipients []string `json:"recipients"`
+	EventID       string   `json:"eventId"`
+	CorrelationID string   `json:"correlationId"`
+	EventType     string   `json:"eventType"`
+	Recipients    []string `json:"recipients"`
 }
 
 type Metrics struct {
@@ -131,7 +132,7 @@ func (c *Consumer) handle(msg *nats.Msg) {
 
 	state, err := c.claim(ctx, envelope.EventID)
 	if err != nil {
-		c.retryOrDeadLetter(msg, envelope.EventID, "inbox_claim_failed", err)
+		c.retryOrDeadLetter(msg, envelope, "inbox_claim_failed", err)
 		return
 	}
 	switch state {
@@ -147,23 +148,23 @@ func (c *Consumer) handle(msg *nats.Msg) {
 
 	if err := c.nc.Publish(FanoutSubject, msg.Data); err != nil {
 		_ = c.release(ctx, envelope.EventID)
-		c.retryOrDeadLetter(msg, envelope.EventID, "fanout_publish_failed", err)
+		c.retryOrDeadLetter(msg, envelope, "fanout_publish_failed", err)
 		return
 	}
 	if err := c.nc.FlushTimeout(2 * time.Second); err != nil {
 		_ = c.release(ctx, envelope.EventID)
-		c.retryOrDeadLetter(msg, envelope.EventID, "fanout_flush_failed", err)
+		c.retryOrDeadLetter(msg, envelope, "fanout_flush_failed", err)
 		return
 	}
 	c.metrics.fanouts.Add(1)
 
 	if err := c.complete(ctx, envelope.EventID); err != nil {
-		c.retryOrDeadLetter(msg, envelope.EventID, "inbox_complete_failed", err)
+		c.retryOrDeadLetter(msg, envelope, "inbox_complete_failed", err)
 		return
 	}
 	c.metrics.processed.Add(1)
 	if err := msg.Ack(); err != nil {
-		slog.Warn("jetstream ack failed", "event_id", envelope.EventID, "error", err)
+		slog.Warn("jetstream ack failed", "event_id", envelope.EventID, "correlation_id", envelope.CorrelationID, "error", err)
 	}
 }
 
@@ -174,6 +175,9 @@ func ParseEnvelope(payload []byte) (Envelope, error) {
 	}
 	if envelope.EventID == "" || envelope.EventType == "" {
 		return Envelope{}, errors.New("eventId and eventType are required")
+	}
+	if envelope.CorrelationID == "" {
+		envelope.CorrelationID = envelope.EventID
 	}
 	return envelope, nil
 }
@@ -216,7 +220,7 @@ func (c *Consumer) release(ctx context.Context, eventID string) error {
 	return c.redis.Del(ctx, inboxKey(eventID)).Err()
 }
 
-func (c *Consumer) retryOrDeadLetter(msg *nats.Msg, eventID, reason string, cause error) {
+func (c *Consumer) retryOrDeadLetter(msg *nats.Msg, envelope Envelope, reason string, cause error) {
 	attempt := deliveryAttempt(msg)
 	if attempt >= maxDeliveryAttempts {
 		c.deadLetter(msg, reason, cause)
@@ -224,7 +228,13 @@ func (c *Consumer) retryOrDeadLetter(msg *nats.Msg, eventID, reason string, caus
 	}
 	c.metrics.retries.Add(1)
 	delay := RetryDelay(attempt)
-	slog.Warn("jetstream event retry", "event_id", eventID, "reason", reason, "attempt", attempt, "delay", delay, "error", cause)
+	slog.Warn("jetstream event retry",
+		"event_id", envelope.EventID,
+		"correlation_id", envelope.CorrelationID,
+		"reason", reason,
+		"attempt", attempt,
+		"delay", delay,
+		"error", cause)
 	_ = msg.NakWithDelay(delay)
 }
 
@@ -250,7 +260,13 @@ func (c *Consumer) deadLetter(msg *nats.Msg, reason string, cause error) {
 		return
 	}
 	c.metrics.deadLetters.Add(1)
-	slog.Error("event moved to durable dead letter", "reason", reason, "error", cause)
+	correlationID := ""
+	eventID := ""
+	if envelope, parseErr := ParseEnvelope(msg.Data); parseErr == nil {
+		correlationID = envelope.CorrelationID
+		eventID = envelope.EventID
+	}
+	slog.Error("event moved to durable dead letter", "event_id", eventID, "correlation_id", correlationID, "reason", reason, "error", cause)
 	_ = msg.Term()
 }
 
