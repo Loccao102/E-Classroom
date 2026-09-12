@@ -1,0 +1,19 @@
+{
+  "eventId": "9b6db32a-b7a5-4e63-bb66-747b78ea7af1",
+  "eventType": "student.attendance.changed",
+  "eventVersion": 1,
+  "occurredAt": "2026-09-13T00:00:00Z",
+  "schoolId": "61caeb6e-dcbf-4ba4-b348-b9e67947ee30",
+  "recipients": [
+    "20ce4bad-f6ab-48ac-988a-c94b5940cf77"
+  ],
+  "data": {
+    "entityId": "d44fb0e2-b2c3-4dcf-9397-b57ec1daf44e",
+    "entityType": "ATTENDANCE_SESSION",
+    "title": "Student A - attendance update",
+    "body": "Student A was marked ABSENT on 2026-09-13 period 1",
+    "notificationIds": [
+      "fd55ec36-0a7a-427c-a209-0c69b498413e"
+    ]
+  }
+}
