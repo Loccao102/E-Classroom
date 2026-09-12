@@ -98,7 +98,7 @@ func (c *Consumer) Subscribe() (*nats.Subscription, error) {
 		nats.AckExplicit(),
 		nats.AckWait(30*time.Second),
 		nats.MaxDeliver(int(maxDeliveryAttempts)),
-		nats.DeliverAllAvailable(),
+		nats.DeliverAll(),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("subscribe durable jetstream consumer: %w", err)
