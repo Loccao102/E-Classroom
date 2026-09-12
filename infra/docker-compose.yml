@@ -13,7 +13,7 @@ services:
       test: ["CMD-SHELL", "pg_isready -U eclassroom -d eclassroom"]
       interval: 5s
       timeout: 3s
-      retries: 10
+      retries: 20
 
   redis:
     image: redis:8-alpine
@@ -26,7 +26,7 @@ services:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
-      retries: 10
+      retries: 20
 
   nats:
     image: nats:2.11-alpine
@@ -40,7 +40,7 @@ services:
       test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8222/healthz"]
       interval: 5s
       timeout: 3s
-      retries: 10
+      retries: 20
 
   core-api:
     build:
@@ -50,17 +50,27 @@ services:
       DB_USER: eclassroom
       DB_PASSWORD: eclassroom
       DB_POOL_MAX: 20
+      NATS_URL: nats://nats:4222
+      APP_JWT_SECRET: local-development-secret-change-this-0123456789
+      APP_JWT_ISSUER: eclassroom
+      BOOTSTRAP_ADMIN_EMAIL: admin@eclassroom.local
+      BOOTSTRAP_ADMIN_PASSWORD: Admin123!
+      BOOTSTRAP_ADMIN_NAME: E-Classroom Admin
+      BOOTSTRAP_SCHOOL_CODE: DEMO
+      BOOTSTRAP_SCHOOL_NAME: E-Classroom Demo School
     ports:
       - "8080:8080"
     depends_on:
       postgres:
         condition: service_healthy
+      nats:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/actuator/health/readiness"]
       interval: 10s
       timeout: 3s
-      retries: 12
-      start_period: 20s
+      retries: 18
+      start_period: 25s
 
   realtime-gateway:
     build:
@@ -70,6 +80,9 @@ services:
       GIN_MODE: release
       REDIS_ADDR: redis:6379
       NATS_URL: nats://nats:4222
+      APP_JWT_SECRET: local-development-secret-change-this-0123456789
+      APP_JWT_ISSUER: eclassroom
+      ALLOWED_ORIGINS: http://localhost:3000
     ports:
       - "8090:8090"
     depends_on:
@@ -77,10 +90,24 @@ services:
         condition: service_healthy
       nats:
         condition: service_healthy
-      core-api:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8090/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+
+  web:
+    build:
+      context: ../apps/web
+    ports:
+      - "3000:80"
+    depends_on:
+      core-api:
+        condition: service_healthy
+      realtime-gateway:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost/healthz"]
       interval: 10s
       timeout: 3s
       retries: 10
