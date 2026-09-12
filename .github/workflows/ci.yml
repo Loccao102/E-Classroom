@@ -36,15 +36,15 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.27.x'
-          cache: false
-      - name: Resolve module graph
+          cache-dependency-path: services/realtime-gateway/go.sum
+      - name: Download dependencies
+        run: go mod download
+      - name: Verify dependency checksums
+        run: go mod verify
+      - name: Ensure module files are tidy
         run: |
           go mod tidy
-          echo '--- GENERATED GO.MOD ---'
-          cat go.mod
-          echo '--- GENERATED GO.SUM ---'
-          cat go.sum
-          echo '--- END GENERATED MODULE FILES ---'
+          git diff --exit-code -- go.mod go.sum
       - name: Format check
         run: test -z "$(gofmt -l .)"
       - name: Test
