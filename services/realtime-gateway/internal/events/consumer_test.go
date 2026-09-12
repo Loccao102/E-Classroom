@@ -49,3 +49,19 @@ func TestRetryDelayIsBounded(t *testing.T) {
 		}
 	}
 }
+
+func TestDeadLetterIDIsDeterministicAndReasonScoped(t *testing.T) {
+	payload := []byte(`{"eventId":"evt-1","eventType":"student.attendance.changed"}`)
+	first := deadLetterID("fanout_failed", payload)
+	second := deadLetterID("fanout_failed", payload)
+	otherReason := deadLetterID("invalid_event", payload)
+	if first != second {
+		t.Fatalf("dead letter id must be deterministic: %q != %q", first, second)
+	}
+	if first == otherReason {
+		t.Fatal("dead letter id must include failure reason")
+	}
+	if len(first) != 68 || first[:4] != "dlq-" {
+		t.Fatalf("unexpected dead letter id format %q", first)
+	}
+}
