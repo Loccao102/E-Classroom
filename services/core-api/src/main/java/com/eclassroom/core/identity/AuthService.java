@@ -17,6 +17,8 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.Base64;
 import java.util.LinkedHashMap;
@@ -121,12 +123,14 @@ public class AuthService {
         byte[] bytes = new byte[48];
         random.nextBytes(bytes);
         String refresh = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+        OffsetDateTime refreshExpiresAt = OffsetDateTime.ofInstant(
+                now.plus(refreshDays, ChronoUnit.DAYS), ZoneOffset.UTC);
         jdbc.update(
                 "INSERT INTO identity.refresh_tokens(id,user_id,token_hash,expires_at) VALUES (?,?,?,?)",
                 UUID.randomUUID(),
                 user.id(),
                 sha256(refresh),
-                now.plus(refreshDays, ChronoUnit.DAYS));
+                refreshExpiresAt);
         return new TokenResponse(access, refresh, exp, "Bearer");
     }
 
