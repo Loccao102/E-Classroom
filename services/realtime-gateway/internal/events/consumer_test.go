@@ -18,6 +18,9 @@ func TestParseAttendanceContractFixture(t *testing.T) {
 	if envelope.EventID != "9b6db32a-b7a5-4e63-bb66-747b78ea7af1" {
 		t.Fatalf("unexpected event id %q", envelope.EventID)
 	}
+	if envelope.CorrelationID != "request-2026-09-13-demo" {
+		t.Fatalf("unexpected correlation id %q", envelope.CorrelationID)
+	}
 	if envelope.EventType != "student.attendance.changed" {
 		t.Fatalf("unexpected event type %q", envelope.EventType)
 	}
@@ -29,6 +32,16 @@ func TestParseAttendanceContractFixture(t *testing.T) {
 func TestParseEnvelopeRejectsMissingIdentity(t *testing.T) {
 	if _, err := ParseEnvelope([]byte(`{"recipients":["u1"]}`)); err == nil {
 		t.Fatal("expected validation error")
+	}
+}
+
+func TestCorrelationFallsBackToEventID(t *testing.T) {
+	envelope, err := ParseEnvelope([]byte(`{"eventId":"evt-1","eventType":"student.attendance.changed"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if envelope.CorrelationID != "evt-1" {
+		t.Fatalf("unexpected correlation fallback %q", envelope.CorrelationID)
 	}
 }
 
