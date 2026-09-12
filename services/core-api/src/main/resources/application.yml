@@ -9,35 +9,35 @@ spring:
       maximum-pool-size: ${DB_POOL_MAX:20}
       minimum-idle: ${DB_POOL_MIN:2}
       connection-timeout: 3000
-      validation-timeout: 1000
   jpa:
     open-in-view: false
     hibernate:
       ddl-auto: validate
     properties:
-      hibernate:
-        jdbc:
-          time_zone: UTC
+      hibernate.jdbc.time_zone: UTC
   flyway:
     enabled: true
     locations: classpath:db/migration
-
 server:
   port: ${PORT:8080}
   shutdown: graceful
-
 management:
-  endpoints:
-    web:
-      exposure:
-        include: health,info,metrics,prometheus
-  endpoint:
-    health:
-      probes:
-        enabled: true
-      show-details: never
-
-logging:
-  level:
-    root: INFO
-    com.eclassroom: INFO
+  endpoints.web.exposure.include: health,info,metrics,prometheus
+  endpoint.health:
+    probes.enabled: true
+    show-details: never
+app:
+  jwt:
+    secret: ${APP_JWT_SECRET:dev-only-change-me-please-32-bytes-minimum}
+    issuer: ${APP_JWT_ISSUER:eclassroom}
+    access-minutes: ${APP_ACCESS_MINUTES:15}
+    refresh-days: ${APP_REFRESH_DAYS:30}
+  nats:
+    url: ${NATS_URL:nats://localhost:4222}
+  bootstrap:
+    email: ${BOOTSTRAP_ADMIN_EMAIL:}
+    password: ${BOOTSTRAP_ADMIN_PASSWORD:}
+    full-name: ${BOOTSTRAP_ADMIN_NAME:System Admin}
+    school-code: ${BOOTSTRAP_SCHOOL_CODE:DEMO}
+    school-name: ${BOOTSTRAP_SCHOOL_NAME:E-Classroom Demo School}
+logging.level.com.eclassroom: INFO
