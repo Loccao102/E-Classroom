@@ -17,6 +17,7 @@ import java.security.SecureRandom;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -59,7 +60,13 @@ public class AuthService {
 
     private TokenResponse issue(UserRow user) {
         Instant now = Instant.now(); Instant exp = now.plus(accessMinutes, ChronoUnit.MINUTES);
-        List<Map<String,Object>> memberships = jdbc.queryForList("SELECT school_id,role FROM identity.school_memberships WHERE user_id=? AND status='ACTIVE'", user.id());
+        List<Map<String,Object>> rawMemberships = jdbc.queryForList("SELECT school_id,role FROM identity.school_memberships WHERE user_id=? AND status='ACTIVE'", user.id());
+        List<Map<String,String>> memberships = rawMemberships.stream().map(row -> {
+            Map<String,String> claim = new LinkedHashMap<>();
+            claim.put("schoolId", String.valueOf(row.get("school_id")));
+            claim.put("role", String.valueOf(row.get("role")));
+            return claim;
+        }).toList();
         JwtClaimsSet claims = JwtClaimsSet.builder().issuer(issuer).issuedAt(now).expiresAt(exp).subject(user.id().toString())
                 .claim("email", user.email()).claim("name", user.fullName()).claim("platformRole", user.platformRole()==null?"":user.platformRole()).claim("memberships", memberships).build();
         String access = encoder.encode(JwtEncoderParameters.from(claims)).getTokenValue();
