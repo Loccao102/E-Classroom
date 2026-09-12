@@ -98,15 +98,40 @@ The initial Java backend is a **modular monolith**, not a collection of tiny ser
 9. **Idempotent consumers** for asynchronous processing.
 10. **Optimize from measurements**, but design hot paths so they can be partitioned and cached.
 
+## Run locally
+
+Start the complete local foundation:
+
+```bash
+docker compose -f infra/docker-compose.yml up --build
+```
+
+Useful endpoints after startup:
+
+```text
+Java Core API readiness : http://localhost:8080/actuator/health/readiness
+Go realtime readiness   : http://localhost:8090/ready
+Go realtime liveness    : http://localhost:8090/live
+NATS monitoring         : http://localhost:8222
+```
+
+Business APIs are secure by default. Authentication is intentionally the next implementation phase rather than exposing temporary unauthenticated domain endpoints.
+
 ## Current implementation stage
 
 - [x] Repository initialized
 - [x] Architecture direction selected
-- [ ] Domain documentation
-- [ ] Local infrastructure
-- [ ] Java Core API bootstrap
-- [ ] Go realtime gateway bootstrap
-- [ ] CI
-- [ ] First vertical slice: School -> Class -> Student -> Attendance -> Parent notification
+- [x] Product, domain, API/event, scalability and roadmap documentation
+- [x] PostgreSQL + Redis + NATS local infrastructure
+- [x] Java Core API bootstrap
+- [x] Flyway schemas, audit table and transactional-outbox foundation
+- [x] First Java domain module: School
+- [x] Go/Gin realtime gateway bootstrap with health probes and graceful shutdown
+- [x] Docker images for Java and Go
+- [x] Strict CI for Java and Go
+- [x] Go dependency graph/checksums committed and verified in CI
+- [ ] Identity, school membership and tenant context
+- [ ] Academic structure, people and teaching assignments
+- [ ] First end-to-end vertical slice: Attendance -> Outbox -> NATS -> Go -> Parent notification
 
-See [`docs/`](docs/) for the detailed design.
+See [`docs/`](docs/) for the detailed design and GitHub Issues for the active implementation backlog.
