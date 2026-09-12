@@ -2,6 +2,8 @@ package events
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +17,7 @@ import (
 
 const (
 	StreamName          = "ECLASSROOM_EVENTS"
+	DLQStreamName       = "ECLASSROOM_DLQ"
 	DurableName         = "realtime-gateway-v1"
 	QueueGroup          = "realtime-gateway"
 	EventSubject        = "eclassroom.>"
@@ -68,22 +71,32 @@ func NewConsumer(nc *nats.Conn, rdb *redis.Client, metrics *Metrics) (*Consumer,
 }
 
 func (c *Consumer) EnsureStream() error {
-	if _, err := c.js.StreamInfo(StreamName); err == nil {
+	if err := c.ensureStream(StreamName, EventSubject, 14*24*time.Hour); err != nil {
+		return err
+	}
+	if err := c.ensureStream(DLQStreamName, DeadLetterSubject, 30*24*time.Hour); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *Consumer) ensureStream(name, subject string, maxAge time.Duration) error {
+	if _, err := c.js.StreamInfo(name); err == nil {
 		return nil
 	} else if !errors.Is(err, nats.ErrStreamNotFound) {
-		return fmt.Errorf("inspect jetstream stream: %w", err)
+		return fmt.Errorf("inspect jetstream stream %s: %w", name, err)
 	}
 
 	_, err := c.js.AddStream(&nats.StreamConfig{
-		Name:      StreamName,
-		Subjects:  []string{EventSubject},
+		Name:      name,
+		Subjects:  []string{subject},
 		Retention: nats.LimitsPolicy,
 		Storage:   nats.FileStorage,
-		MaxAge:    14 * 24 * time.Hour,
+		MaxAge:    maxAge,
 		Discard:   nats.DiscardOld,
 	})
 	if err != nil {
-		return fmt.Errorf("create jetstream stream: %w", err)
+		return fmt.Errorf("create jetstream stream %s: %w", name, err)
 	}
 	return nil
 }
@@ -216,25 +229,34 @@ func (c *Consumer) retryOrDeadLetter(msg *nats.Msg, eventID, reason string, caus
 }
 
 func (c *Consumer) deadLetter(msg *nats.Msg, reason string, cause error) {
-	c.metrics.deadLetters.Add(1)
 	headers := nats.Header{}
 	headers.Set("X-E-Classroom-DLQ-Reason", reason)
 	if cause != nil {
 		headers.Set("X-E-Classroom-DLQ-Error", cause.Error())
 	}
+	headers.Set("Nats-Msg-Id", deadLetterID(reason, msg.Data))
+	headers.Set("Nats-Expected-Stream", DLQStreamName)
 	dlq := &nats.Msg{Subject: DeadLetterSubject, Header: headers, Data: msg.Data}
-	if err := c.nc.PublishMsg(dlq); err != nil {
-		slog.Error("dead-letter publish failed", "reason", reason, "error", err)
+
+	ack, err := c.js.PublishMsg(dlq)
+	if err != nil {
+		slog.Error("dead-letter jetstream publish failed", "reason", reason, "error", err)
 		_ = msg.NakWithDelay(30 * time.Second)
 		return
 	}
-	if err := c.nc.FlushTimeout(2 * time.Second); err != nil {
-		slog.Error("dead-letter flush failed", "reason", reason, "error", err)
+	if ack.Stream != DLQStreamName {
+		slog.Error("dead-letter stored in unexpected stream", "reason", reason, "stream", ack.Stream)
 		_ = msg.NakWithDelay(30 * time.Second)
 		return
 	}
-	slog.Error("event moved to dead letter", "reason", reason, "error", cause)
+	c.metrics.deadLetters.Add(1)
+	slog.Error("event moved to durable dead letter", "reason", reason, "error", cause)
 	_ = msg.Term()
+}
+
+func deadLetterID(reason string, payload []byte) string {
+	digest := sha256.Sum256(append([]byte(reason+":"), payload...))
+	return "dlq-" + hex.EncodeToString(digest[:])
 }
 
 func deliveryAttempt(msg *nats.Msg) uint64 {
