@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Loccao102/E-Classroom/services/realtime-gateway/internal/auth"
+	"github.com/Loccao102/E-Classroom/services/realtime-gateway/internal/events"
 	"github.com/Loccao102/E-Classroom/services/realtime-gateway/internal/realtime"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -50,13 +51,28 @@ func main() {
 	}
 
 	hub := realtime.NewHub(rdb, instanceID)
-	if _, err := nc.Subscribe("eclassroom.>", func(m *nats.Msg) {
+	metrics := &events.Metrics{}
+	consumer, err := events.NewConsumer(nc, rdb, metrics)
+	if err != nil {
+		slog.Error("jetstream consumer setup failed", "error", err)
+		os.Exit(1)
+	}
+	if err := consumer.EnsureStream(); err != nil {
+		slog.Error("jetstream stream setup failed", "error", err)
+		os.Exit(1)
+	}
+	if _, err := consumer.Subscribe(); err != nil {
+		slog.Error("jetstream durable subscribe failed", "error", err)
+		os.Exit(1)
+	}
+
+	if _, err := nc.Subscribe(events.FanoutSubject, func(m *nats.Msg) {
 		recipients := realtime.ParseRecipients(m.Data)
 		if len(recipients) > 0 {
 			hub.Deliver(recipients, m.Data)
 		}
 	}); err != nil {
-		slog.Error("nats subscribe failed", "error", err)
+		slog.Error("realtime fanout subscribe failed", "error", err)
 		os.Exit(1)
 	}
 	if err := nc.FlushTimeout(3 * time.Second); err != nil {
@@ -77,7 +93,11 @@ func main() {
 	router := gin.New()
 	router.Use(gin.Recovery(), requestLogger())
 	router.GET("/live", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "ok", "connections": hub.Count()})
+		c.JSON(http.StatusOK, gin.H{
+			"status":      "ok",
+			"connections": hub.Count(),
+			"events":      metrics.Snapshot(),
+		})
 	})
 	router.GET("/ready", func(c *gin.Context) {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), time.Second)
@@ -86,7 +106,11 @@ func main() {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready"})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"status": "ready", "connections": hub.Count()})
+		c.JSON(http.StatusOK, gin.H{
+			"status":      "ready",
+			"connections": hub.Count(),
+			"events":      metrics.Snapshot(),
+		})
 	})
 	router.GET("/realtime/v1/ws", func(c *gin.Context) {
 		token := c.Query("access_token")
