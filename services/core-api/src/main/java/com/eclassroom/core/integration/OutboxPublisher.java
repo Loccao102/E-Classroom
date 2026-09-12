@@ -1,8 +1,8 @@
 package com.eclassroom.core.integration;
 
 import io.nats.client.JetStream;
-import io.nats.client.PublishAck;
 import io.nats.client.PublishOptions;
+import io.nats.client.api.PublishAck;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
