@@ -10,7 +10,11 @@ RUN mvn -B -DskipTests package
 FROM eclipse-temurin:21-jre
 WORKDIR /app
 
-RUN useradd --system --uid 10001 eclassroom
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --system --uid 10001 eclassroom
+
 COPY --from=build /workspace/target/*.jar app.jar
 
 USER 10001
