@@ -11,6 +11,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.postgresql.ds.PGSimpleDataSource;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -19,7 +20,6 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
-import org.springframework.test.context.ContextConfiguration;
 import org.springframework.test.context.junit.jupiter.SpringJUnitConfig;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
@@ -43,7 +43,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @Testcontainers
 @SpringJUnitConfig(AccountSecurityIntegrationTest.TestConfig.class)
-@ContextConfiguration(classes = AccountSecurityIntegrationTest.TestConfig.class)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class AccountSecurityIntegrationTest {
     @Container
@@ -58,6 +57,7 @@ class AccountSecurityIntegrationTest {
     private final AccountSecurityService accounts;
     private final AuthService.ClientContext client;
 
+    @Autowired
     AccountSecurityIntegrationTest(JdbcTemplate jdbc,
                                    PasswordEncoder passwords,
                                    AuthService auth,
