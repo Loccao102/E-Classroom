@@ -12,6 +12,7 @@ type Props = {
 }
 
 type AudienceOption = { id: string; name: string }
+type Mutate = (action: () => Promise<unknown>, success: string) => Promise<void>
 
 export function MeetingPage({ schoolId, isAdmin, isTeacher, isParent, isStudent }: Props) {
   const [meetings, setMeetings] = useState<Meeting[]>([])
@@ -24,6 +25,7 @@ export function MeetingPage({ schoolId, isAdmin, isTeacher, isParent, isStudent 
   const [error, setError] = useState('')
 
   const canCreate = isAdmin || isTeacher
+
   const loadMeetings = async (preferred?: string) => {
     try {
       const rows = await api<Meeting[]>(`/api/v1/schools/${schoolId}/meetings`)
@@ -31,6 +33,7 @@ export function MeetingPage({ schoolId, isAdmin, isTeacher, isParent, isStudent 
       setSelected(current => preferred || current || rows[0]?.id || '')
     } catch (err) { setError((err as Error).message) }
   }
+
   const loadDetails = async () => {
     if (!selected) { setDetails(null); return }
     try { setDetails(await api<MeetingDetails>(`/api/v1/meetings/${selected}`)) }
@@ -40,17 +43,25 @@ export function MeetingPage({ schoolId, isAdmin, isTeacher, isParent, isStudent 
   useEffect(() => { setSelected(''); setDetails(null); void loadMeetings() }, [schoolId])
   useEffect(() => { void loadDetails() }, [selected])
 
-  const mutate = async (action: () => Promise<unknown>, success: string) => {
+  const mutate: Mutate = async (action, success) => {
     setBusy(true); setError(''); setMessage('')
-    try { await action(); setMessage(success); await loadMeetings(selected); await loadDetails() }
-    catch (err) { setError((err as Error).message) }
+    try {
+      await action()
+      setMessage(success)
+      await loadMeetings(selected)
+      await loadDetails()
+    } catch (err) { setError((err as Error).message) }
     finally { setBusy(false) }
   }
 
   const active = details?.meeting
-  const upcoming = active?.status === 'SCHEDULED' && new Date(active.startsAt).getTime() > Date.now()
-  const started = active && new Date(active.startsAt).getTime() <= Date.now()
-  const ended = active && new Date(active.endsAt).getTime() <= Date.now()
+  const upcoming = Boolean(active?.status === 'SCHEDULED' && new Date(active.startsAt).getTime() > Date.now())
+  const started = Boolean(active && new Date(active.startsAt).getTime() <= Date.now())
+  const ended = Boolean(active && new Date(active.endsAt).getTime() <= Date.now())
+  const canRecordOutcome = Boolean(details?.manageable && active && started && active.status !== 'CANCELLED')
+  // A multi-role staff+parent account receives the staff detail shape when it manages a meeting.
+  // Hide family mutation controls in that shape so it cannot accidentally act on another invitee.
+  const showParentActions = Boolean(isParent && details && !details.manageable && details.invitees.length > 0)
 
   return <section className="workspace meeting-workspace">
     <SectionHeading eyebrow="Nhà trường · Gia đình" title="Lịch họp & trao đổi" description="Lời mời, phản hồi, khung giờ 1-1 và kết quả sau buổi họp ở cùng một nơi." actions={canCreate ? <button className="primary" onClick={() => setCreateOpen(true)}>Tạo lịch họp</button> : undefined} />
@@ -77,30 +88,28 @@ export function MeetingPage({ schoolId, isAdmin, isTeacher, isParent, isStudent 
 
           {details.manageable && <div className="meeting-actions">
             {upcoming && <button disabled={busy} onClick={() => void mutate(() => api(`/api/v1/meetings/${active.id}/reminders`, { method: 'POST' }), 'Đã gửi nhắc lịch tới các phụ huynh đủ điều kiện.')}>Gửi nhắc lịch</button>}
-            <button onClick={() => setOutcomeOpen(true)}>Ghi kết quả</button>
+            {canRecordOutcome && <button onClick={() => setOutcomeOpen(true)}>Ghi kết quả</button>}
             {active.status === 'SCHEDULED' && <button className="danger-ghost" disabled={busy} onClick={() => void mutate(() => api(`/api/v1/meetings/${active.id}/cancel`, { method: 'POST', body: JSON.stringify({ version: active.version }) }), 'Đã huỷ lịch họp.')}>Huỷ lịch</button>}
             {active.status === 'SCHEDULED' && ended && <button className="primary" disabled={busy} onClick={() => void mutate(() => api(`/api/v1/meetings/${active.id}/complete`, { method: 'POST', body: JSON.stringify({ version: active.version }) }), 'Đã hoàn tất buổi họp.')}>Đánh dấu hoàn tất</button>}
           </div>}
 
-          {isParent && details.invitees.length > 0 && <ParentResponsePanel meeting={active} invitees={details.invitees} slots={details.slots} busy={busy} mutate={mutate} />}
-
-          {details.manageable && <InviteePanel meeting={active} invitees={details.invitees} started={Boolean(started)} busy={busy} mutate={mutate} />}
-
+          {showParentActions && <ParentResponsePanel meeting={active} invitees={details.invitees} slots={details.slots} busy={busy} mutate={mutate} />}
+          {details.manageable && <InviteePanel meeting={active} invitees={details.invitees} started={started} busy={busy} mutate={mutate} />}
           {!details.manageable && !isParent && isStudent && <div className="meeting-note"><strong>Thông tin dành cho học sinh</strong><p>Bạn được đưa vào phạm vi của buổi họp này. Các kết quả được phép chia sẻ sẽ xuất hiện bên dưới.</p></div>}
 
-          <section className="meeting-section"><div className="meeting-section-head"><div><span>Sau buổi họp</span><h4>Kết quả & việc cần theo dõi</h4></div>{details.manageable && <button onClick={() => setOutcomeOpen(true)}>+ Thêm ghi nhận</button>}</div>
-            {details.outcomes.length ? <div className="outcome-list">{details.outcomes.map(outcome => <article key={outcome.id}><div><Badge tone={outcome.visibility === 'STAFF_ONLY' ? 'neutral' : outcome.visibility === 'GUARDIAN' ? 'warning' : 'info'}>{visibilityLabel(outcome.visibility)}</Badge>{outcome.studentName && <span>{outcome.studentName}</span>}<time>{formatDateTime(outcome.createdAt)}</time></div><p>{outcome.body}</p><small>{outcome.recordedByName}</small></article>)}</div> : <Empty text="Chưa có kết quả hoặc ghi chú theo dõi." />}
+          <section className="meeting-section"><div className="meeting-section-head"><div><span>Sau buổi họp</span><h4>Kết quả & việc cần theo dõi</h4></div>{canRecordOutcome && <button onClick={() => setOutcomeOpen(true)}>+ Thêm ghi nhận</button>}</div>
+            {details.outcomes.length ? <div className="outcome-list">{details.outcomes.map(outcome => <article key={outcome.id}><div><Badge tone={outcome.visibility === 'STAFF_ONLY' ? 'neutral' : outcome.visibility === 'GUARDIAN' ? 'warning' : 'info'}>{visibilityLabel(outcome.visibility)}</Badge>{outcome.studentName && <span>{outcome.studentName}</span>}<time>{formatDateTime(outcome.createdAt)}</time></div><p>{outcome.body}</p><small>{outcome.recordedByName}</small></article>)}</div> : <Empty text={started ? 'Chưa có kết quả hoặc ghi chú theo dõi.' : 'Kết quả sẽ được ghi nhận sau khi buổi họp bắt đầu.'} />}
           </section>
         </>}
       </main>
     </div>
 
     <CreateMeetingModal open={createOpen} schoolId={schoolId} isAdmin={isAdmin} isTeacher={isTeacher} onClose={() => setCreateOpen(false)} onSaved={async id => { setCreateOpen(false); setMessage('Đã tạo lịch họp và gửi lời mời trong hệ thống.'); await loadMeetings(id) }} />
-    {active && <OutcomeModal open={outcomeOpen} meeting={active} invitees={details?.invitees || []} onClose={() => setOutcomeOpen(false)} onSaved={async () => { setOutcomeOpen(false); setMessage('Đã lưu kết quả buổi họp.'); await loadDetails() }} />}
+    {active && canRecordOutcome && <OutcomeModal open={outcomeOpen} meeting={active} invitees={details?.invitees || []} onClose={() => setOutcomeOpen(false)} onSaved={async () => { setOutcomeOpen(false); setMessage('Đã lưu kết quả buổi họp.'); await loadDetails() }} />}
   </section>
 }
 
-function ParentResponsePanel({ meeting, invitees, slots, busy, mutate }: { meeting: Meeting; invitees: MeetingInvitee[]; slots: MeetingSlot[]; busy: boolean; mutate: (action: () => Promise<unknown>, success: string) => Promise<void> }) {
+function ParentResponsePanel({ meeting, invitees, slots, busy, mutate }: { meeting: Meeting; invitees: MeetingInvitee[]; slots: MeetingSlot[]; busy: boolean; mutate: Mutate }) {
   return <section className="meeting-section response-panel"><div className="meeting-section-head"><div><span>Phản hồi của gia đình</span><h4>Xác nhận tham dự</h4></div></div>
     <div className="family-responses">{invitees.map(invitee => <article key={invitee.id}><div><strong>{invitee.studentName}</strong><MeetingResponse value={invitee.response} /></div><div className="response-actions"><button disabled={busy || meeting.status !== 'SCHEDULED' || invitee.response === 'ACCEPTED'} onClick={() => void mutate(() => api(`/api/v1/meetings/${meeting.id}/response`, { method: 'PUT', body: JSON.stringify({ studentId: invitee.studentId, response: 'ACCEPTED', version: invitee.version }) }), 'Đã xác nhận tham dự.')}>Tham dự</button><button disabled={busy || meeting.status !== 'SCHEDULED' || invitee.response === 'DECLINED'} onClick={() => void mutate(() => api(`/api/v1/meetings/${meeting.id}/response`, { method: 'PUT', body: JSON.stringify({ studentId: invitee.studentId, response: 'DECLINED', version: invitee.version }) }), 'Đã gửi phản hồi không tham dự.')}>Không tham dự</button></div>
       {invitee.response === 'ACCEPTED' && slots.length > 0 && <div className="slot-picker"><span>Chọn khung giờ trao đổi 1-1</span><div>{slots.map(slot => <SlotButton key={slot.id} slot={slot} meeting={meeting} studentId={invitee.studentId} busy={busy} mutate={mutate} />)}</div></div>}
@@ -108,13 +117,13 @@ function ParentResponsePanel({ meeting, invitees, slots, busy, mutate }: { meeti
   </section>
 }
 
-function SlotButton({ slot, meeting, studentId, busy, mutate }: { slot: MeetingSlot; meeting: Meeting; studentId: string; busy: boolean; mutate: (action: () => Promise<unknown>, success: string) => Promise<void> }) {
+function SlotButton({ slot, meeting, studentId, busy, mutate }: { slot: MeetingSlot; meeting: Meeting; studentId: string; busy: boolean; mutate: Mutate }) {
   if (slot.mine) return <button className="slot selected" disabled={busy} onClick={() => void mutate(() => api(`/api/v1/meetings/${meeting.id}/slots/${slot.id}/booking?studentId=${studentId}&version=${slot.version}`, { method: 'DELETE' }), 'Đã huỷ khung giờ 1-1.')}>{formatTime(slot.startsAt)} · Đã chọn ×</button>
   return <button className="slot" disabled={busy || !slot.available} onClick={() => void mutate(() => api(`/api/v1/meetings/${meeting.id}/slots/${slot.id}/booking`, { method: 'PUT', body: JSON.stringify({ studentId, version: slot.version }) }), 'Đã đặt khung giờ 1-1.')}>{formatTime(slot.startsAt)}{slot.available ? '' : ' · Đã đặt'}</button>
 }
 
-function InviteePanel({ meeting, invitees, started, busy, mutate }: { meeting: Meeting; invitees: MeetingInvitee[]; started: boolean; busy: boolean; mutate: (action: () => Promise<unknown>, success: string) => Promise<void> }) {
-  return <section className="meeting-section"><div className="meeting-section-head"><div><span>Danh sách mời</span><h4>{invitees.length} phụ huynh / học sinh</h4></div></div>{invitees.length ? <div className="invitee-table"><div className="invitee-row header"><span>Gia đình</span><span>Phản hồi</span><span>Điểm danh</span><span>Thao tác</span></div>{invitees.map(invitee => <div className="invitee-row" key={invitee.id}><div><strong>{invitee.guardianName}</strong><small>{invitee.studentName}</small></div><MeetingResponse value={invitee.response} /><AttendanceBadge value={invitee.attendance} /><div className="attendance-actions">{started && meeting.status !== 'CANCELLED' ? <><button disabled={busy || invitee.attendance === 'PRESENT'} onClick={() => void mutate(() => api(`/api/v1/meetings/${meeting.id}/invitees/${invitee.id}/attendance`, { method: 'PUT', body: JSON.stringify({ attendance: 'PRESENT', version: invitee.version }) }), 'Đã ghi nhận phụ huynh có mặt.')}>Có mặt</button><button disabled={busy || invitee.attendance === 'ABSENT'} onClick={() => void mutate(() => api(`/api/v1/meetings/${meeting.id}/invitees/${invitee.id}/attendance`, { method: 'PUT', body: JSON.stringify({ attendance: 'ABSENT', version: invitee.version }) }), 'Đã ghi nhận vắng mặt.')}>Vắng</button></> : <span className="muted">Chưa đến giờ</span>}</div></div>)}</div> : <Empty text="Không có phụ huynh có tài khoản đang hoạt động trong phạm vi này." />}</section>
+function InviteePanel({ meeting, invitees, started, busy, mutate }: { meeting: Meeting; invitees: MeetingInvitee[]; started: boolean; busy: boolean; mutate: Mutate }) {
+  return <section className="meeting-section"><div className="meeting-section-head"><div><span>Danh sách mời</span><h4>{invitees.length} phụ huynh / học sinh</h4></div></div>{invitees.length ? <div className="invitee-table"><div className="invitee-row header"><span>Gia đình</span><span>Phản hồi</span><span>Điểm danh</span><span>Thao tác</span></div>{invitees.map(invitee => <div className="invitee-row" key={invitee.id}><div><strong>{invitee.guardianName}</strong><small>{invitee.studentName}</small></div><MeetingResponse value={invitee.response} /><AttendanceBadge value={invitee.attendance} /><div className="attendance-actions">{started && meeting.status !== 'CANCELLED' ? <><button disabled={busy || invitee.attendance === 'PRESENT'} onClick={() => void mutate(() => api(`/api/v1/meetings/${meeting.id}/invitees/${invitee.id}/attendance`, { method: 'PUT', body: JSON.stringify({ attendance: 'PRESENT', version: invitee.version }) }), 'Đã ghi nhận phụ huynh có mặt.')}>Có mặt</button><button disabled={busy || invitee.attendance === 'ABSENT'} onClick={() => void mutate(() => api(`/api/v1/meetings/${meeting.id}/invitees/${invitee.id}/attendance`, { method: 'PUT', body: JSON.stringify({ attendance: 'ABSENT', version: invitee.version }) }), 'Đã ghi nhận vắng mặt.')}>Vắng</button></> : <span className="muted">{meeting.status === 'CANCELLED' ? 'Đã huỷ' : 'Chưa đến giờ'}</span>}</div></div>)}</div> : <Empty text="Không có phụ huynh có tài khoản đang hoạt động trong phạm vi này." />}</section>
 }
 
 function CreateMeetingModal({ open, schoolId, isAdmin, isTeacher, onClose, onSaved }: { open: boolean; schoolId: string; isAdmin: boolean; isTeacher: boolean; onClose: () => void; onSaved: (id: string) => Promise<void> }) {
@@ -149,7 +158,12 @@ function CreateMeetingModal({ open, schoolId, isAdmin, isTeacher, onClose, onSav
           setClassrooms(classes)
           const rosters = await Promise.all(classes.map(item => api<Row[]>(`/api/v1/schools/${schoolId}/classrooms/${item.id}/roster`).catch(() => [] as Row[])))
           const seen = new Set<string>()
-          setStudents(rosters.flat().flatMap(row => { const id = String(row.id || ''); if (!id || seen.has(id)) return []; seen.add(id); return [{ id, name: String(row.full_name || row.student_code || 'Học sinh') }] }))
+          setStudents(rosters.flat().flatMap(row => {
+            const id = String(row.id || '')
+            if (!id || seen.has(id)) return []
+            seen.add(id)
+            return [{ id, name: String(row.full_name || row.student_code || 'Học sinh') }]
+          }))
         }
       } catch (err) { setError((err as Error).message) }
     }
@@ -166,7 +180,8 @@ function CreateMeetingModal({ open, schoolId, isAdmin, isTeacher, onClose, onSav
       if (!(end.getTime() > start.getTime())) throw new Error('Giờ kết thúc phải sau giờ bắt đầu.')
       const slots = slotMinutes > 0 ? generateSlots(start, end, slotMinutes) : []
       const result = await api<{ id: string }>(`/api/v1/schools/${schoolId}/meetings`, { method: 'POST', body: JSON.stringify({ scopeType, scopeId: scopeType === 'SCHOOL' ? null : scopeId, title: title.trim(), agenda: agenda.trim(), note: note.trim() || null, location: location.trim(), startsAt: start.toISOString(), endsAt: end.toISOString(), includeStudents, slots }) })
-      setTitle(''); setAgenda(''); setNote(''); setLocation(''); setSlotMinutes(0); await onSaved(result.id)
+      setTitle(''); setAgenda(''); setNote(''); setLocation(''); setSlotMinutes(0)
+      await onSaved(result.id)
     } catch (err) { setError((err as Error).message) }
     finally { setBusy(false) }
   }
@@ -183,19 +198,31 @@ function CreateMeetingModal({ open, schoolId, isAdmin, isTeacher, onClose, onSav
 }
 
 function OutcomeModal({ open, meeting, invitees, onClose, onSaved }: { open: boolean; meeting: Meeting; invitees: MeetingInvitee[]; onClose: () => void; onSaved: () => Promise<void> }) {
-  const students = useMemo(() => { const seen = new Set<string>(); return invitees.flatMap(row => { if (seen.has(row.studentId)) return []; seen.add(row.studentId); return [{ id: row.studentId, name: row.studentName }] }) }, [invitees])
+  const students = useMemo(() => {
+    const seen = new Set<string>()
+    return invitees.flatMap(row => {
+      if (seen.has(row.studentId)) return []
+      seen.add(row.studentId)
+      return [{ id: row.studentId, name: row.studentName }]
+    })
+  }, [invitees])
   const [studentId, setStudentId] = useState('')
   const [visibility, setVisibility] = useState('GUARDIAN')
   const [body, setBody] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   useEffect(() => { if (open) setStudentId(students[0]?.id || '') }, [open, students])
+
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault(); setBusy(true); setError('')
-    try { await api(`/api/v1/meetings/${meeting.id}/outcomes`, { method: 'POST', body: JSON.stringify({ studentId: visibility === 'STAFF_ONLY' ? studentId || null : studentId, body: body.trim(), visibility }) }); setBody(''); await onSaved() }
-    catch (err) { setError((err as Error).message) }
+    try {
+      await api(`/api/v1/meetings/${meeting.id}/outcomes`, { method: 'POST', body: JSON.stringify({ studentId: visibility === 'STAFF_ONLY' ? studentId || null : studentId, body: body.trim(), visibility }) })
+      setBody('')
+      await onSaved()
+    } catch (err) { setError((err as Error).message) }
     finally { setBusy(false) }
   }
+
   return <Modal open={open} onClose={onClose} title="Ghi kết quả buổi họp"><DialogForm onSubmit={submit} onCancel={onClose} submitLabel="Lưu kết quả" busy={busy}><Status tone="error">{error}</Status><Field label="Phạm vi chia sẻ"><select value={visibility} onChange={event => setVisibility(event.target.value)}><option value="STAFF_ONLY">Nội bộ nhà trường</option><option value="GUARDIAN">Phụ huynh</option>{meeting.includeStudents && <option value="STUDENT_AND_GUARDIAN">Phụ huynh & học sinh</option>}</select></Field><Field label="Học sinh" hint={visibility === 'STAFF_ONLY' ? 'Có thể bỏ trống cho ghi chú chung.' : 'Bắt buộc với ghi chú gửi gia đình.'}><select required={visibility !== 'STAFF_ONLY'} value={studentId} onChange={event => setStudentId(event.target.value)}><option value="">Ghi chú chung</option>{students.map(student => <option key={student.id} value={student.id}>{student.name}</option>)}</select></Field><Field label="Nội dung"><textarea required maxLength={10000} rows={5} value={body} onChange={event => setBody(event.target.value)} placeholder="Điểm đã thống nhất, việc cần theo dõi…" /></Field></DialogForm></Modal>
 }
 
