@@ -20,7 +20,7 @@ import java.util.stream.Collectors;
 @Service
 public class NotificationService {
     public static final List<String> CATEGORIES = List.of(
-            "ATTENDANCE", "LEAVE", "SCORE", "ANNOUNCEMENT", "COMMENT", "MESSAGE", "SYSTEM");
+            "ATTENDANCE", "LEAVE", "SCORE", "ANNOUNCEMENT", "COMMENT", "MESSAGE", "MEETING", "SYSTEM");
 
     private final JdbcTemplate jdbc;
     private final OutboxService outbox;
@@ -248,6 +248,7 @@ public class NotificationService {
         if (value.contains("announcement")) return "ANNOUNCEMENT";
         if (value.contains("comment")) return "COMMENT";
         if (value.contains("message") || value.contains("conversation")) return "MESSAGE";
+        if (value.contains("meeting")) return "MEETING";
         return "SYSTEM";
     }
 
