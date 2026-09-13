@@ -25,7 +25,6 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -312,8 +311,9 @@ class GradingWorkflowIntegrationTest {
         UUID studentB = student(schoolId, "Student B");
         enroll(schoolId, classroomId, studentA);
         enroll(schoolId, classroomId, studentB);
-        guardianLink(schoolId, studentA, guardianUser, "Guardian A");
-        guardianLink(schoolId, studentB, guardianUser, "Guardian A");
+        UUID guardianId = guardian(schoolId, guardianUser, "Guardian A");
+        guardianLink(schoolId, studentA, guardianId);
+        guardianLink(schoolId, studentB, guardianId);
         UUID subjectId = subject(schoolId);
         UUID assignmentId = UUID.randomUUID();
         jdbc.update(
@@ -407,11 +407,15 @@ class GradingWorkflowIntegrationTest {
                 UUID.randomUUID(), schoolId, classroomId, studentId, LocalDate.of(2026, 8, 1));
     }
 
-    private static void guardianLink(UUID schoolId, UUID studentId, UUID guardianUser, String name) {
+    private static UUID guardian(UUID schoolId, UUID guardianUser, String name) {
         UUID guardianId = UUID.randomUUID();
         jdbc.update(
                 "INSERT INTO academic.guardians(id,school_id,user_id,full_name,status) VALUES (?,?,?,?, 'ACTIVE')",
                 guardianId, schoolId, guardianUser, name);
+        return guardianId;
+    }
+
+    private static void guardianLink(UUID schoolId, UUID studentId, UUID guardianId) {
         jdbc.update(
                 "INSERT INTO academic.student_guardians(school_id,student_id,guardian_id,relationship,primary_contact,notifications_enabled) " +
                         "VALUES (?,?,?,'PARENT',TRUE,TRUE)",
