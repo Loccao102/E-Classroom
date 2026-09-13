@@ -64,10 +64,14 @@ public class GradingService {
         access.requireTeacherAssignment(schoolId, actor, assignmentId);
         validateAssessment(title, category, max, weight);
 
-        Map<String, Object> assignment = jdbc.queryForMap(
+        List<Map<String, Object>> assignments = jdbc.queryForList(
                 "SELECT school_id,classroom_id,semester_id FROM academic.teaching_assignments " +
                         "WHERE id=? AND school_id=? AND status='ACTIVE'",
                 assignmentId, schoolId);
+        if (assignments.isEmpty()) {
+            throw ApiException.notFound("Teaching assignment not found");
+        }
+        Map<String, Object> assignment = assignments.getFirst();
         UUID assignmentSemester = (UUID) assignment.get("semester_id");
         if (semesterId != null) {
             List<Map<String, Object>> semesters = jdbc.queryForList(
@@ -122,9 +126,13 @@ public class GradingService {
         requireDraft(assessment);
         validateScoreBatch(scores, (BigDecimal) assessment.get("max_score"));
 
-        UUID classroomId = jdbc.queryForObject(
+        List<UUID> classrooms = jdbc.query(
                 "SELECT classroom_id FROM academic.teaching_assignments WHERE id=? AND school_id=? AND status='ACTIVE'",
-                UUID.class, assignmentId, schoolId);
+                (rs, i) -> UUID.fromString(rs.getString(1)), assignmentId, schoolId);
+        if (classrooms.isEmpty()) {
+            throw ApiException.conflict("TEACHING_ASSIGNMENT_INACTIVE", "Teaching assignment is no longer active");
+        }
+        UUID classroomId = classrooms.getFirst();
         List<UUID> studentIds = scores.stream().map(ScoreInput::studentId).toList();
         String inClause = placeholders(studentIds.size());
 
@@ -301,6 +309,10 @@ public class GradingService {
                         "WHERE id=? AND status='SUBMITTED' AND version=?",
                 actor, assessmentId, currentVersion);
         if (updated == 0) {
+            Map<String, Object> fresh = assessment(assessmentId);
+            if ("LOCKED".equals(String.valueOf(fresh.get("status")))) {
+                return ((Number) fresh.get("version")).longValue();
+            }
             throw ApiException.conflict("VERSION_CONFLICT", "Assessment changed; reload before locking");
         }
         jdbc.update(
@@ -465,7 +477,7 @@ public class GradingService {
     }
 
     private void requireExpectedVersion(long currentVersion, Long expectedVersion) {
-        if (expectedVersion == null || currentVersion != expectedVersion) {
+        if (expectedVersion != null && currentVersion != expectedVersion) {
             throw ApiException.conflict("VERSION_CONFLICT", "Assessment changed; reload before changing workflow state");
         }
     }
