@@ -11,7 +11,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.json.JsonMapper;
 
-import java.sql.Timestamp;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -65,7 +64,7 @@ public class ConductService {
 
         ConductView created = requireRecord(schoolId, studentId, id, false);
         audit.append(schoolId, actor, "CREATE", "CONDUCT_RECORD", id, null, snapshot(created), null);
-        notifyAudience(created, "student.conduct.created", actor);
+        notifyAudience(schoolId, created, "student.conduct.created", actor);
         return created;
     }
 
@@ -94,14 +93,14 @@ public class ConductService {
         ConductView next = requireRecord(schoolId, studentId, id, false);
         appendRevision(schoolId, id, current, next, actor, safeReason);
         audit.append(schoolId, actor, "UPDATE", "CONDUCT_RECORD", id, snapshot(current), snapshot(next), safeReason);
-        notifyAudience(next, "student.conduct.updated", actor);
+        notifyAudience(schoolId, next, "student.conduct.updated", actor);
         return next;
     }
 
     public List<ConductView> list(UUID schoolId, UUID studentId, UUID actor) {
         requireStudent(schoolId, studentId);
         access.requireStudentView(schoolId, actor, studentId);
-        String visibility = visibilityPredicate(schoolId, actor);
+        String visibility = visibilityPredicate(schoolId, studentId, actor);
         return jdbc.query(
                 "SELECT r.*,u.full_name recorded_by_name,c.name classroom_name,s.name subject_name " +
                         "FROM conduct.records r JOIN identity.users u ON u.id=r.recorded_by " +
@@ -158,15 +157,16 @@ public class ConductService {
                 throw ApiException.badRequest("INVALID_CONDUCT_SUBJECT", "Subject is not in this school");
             }
             if (!access.isPlatformAdmin(actor) && !access.hasRole(schoolId, actor, "SCHOOL_ADMIN")) {
+                Object[] args = classroomId == null
+                        ? new Object[]{schoolId, subjectId, actor, studentId}
+                        : new Object[]{schoolId, subjectId, actor, studentId, classroomId};
                 Integer assigned = jdbc.queryForObject(
                         "SELECT COUNT(*) FROM academic.teaching_assignments ta " +
-                                "JOIN academic.teachers t ON t.id=ta.teacher_id " +
+                                "JOIN academic.teachers t ON t.id=ta.teacher_id AND t.status='ACTIVE' " +
                                 "JOIN academic.class_enrollments e ON e.classroom_id=ta.classroom_id AND e.status='ACTIVE' " +
                                 "WHERE ta.school_id=? AND ta.subject_id=? AND ta.status='ACTIVE' AND t.user_id=? AND e.student_id=? " +
                                 (classroomId == null ? "" : "AND ta.classroom_id=?"),
-                        Integer.class, classroomId == null
-                                ? new Object[]{schoolId, subjectId, actor, studentId}
-                                : new Object[]{schoolId, subjectId, actor, studentId, classroomId});
+                        Integer.class, args);
                 if (assigned == null || assigned == 0) {
                     throw ApiException.forbidden("Teacher is not assigned to this subject for the student");
                 }
@@ -220,17 +220,16 @@ public class ConductService {
         }
     }
 
-    private void notifyAudience(ConductView record, String eventType, UUID actor) {
+    private void notifyAudience(UUID schoolId, ConductView record, String eventType, UUID actor) {
         LinkedHashSet<UUID> recipients = new LinkedHashSet<>();
         if ("GUARDIAN".equals(record.visibility()) || "STUDENT_AND_GUARDIAN".equals(record.visibility())) {
-            recipients.addAll(notifications.guardianRecipients(recordSchool(record.id()), record.studentId()));
+            recipients.addAll(notifications.guardianRecipients(schoolId, record.studentId()));
         }
         if ("STUDENT".equals(record.visibility()) || "STUDENT_AND_GUARDIAN".equals(record.visibility())) {
             recipients.addAll(jdbc.query(
-                    "SELECT user_id FROM academic.students WHERE id=? AND user_id IS NOT NULL AND status='ACTIVE'",
-                    (rs, i) -> UUID.fromString(rs.getString(1)), record.studentId()));
+                    "SELECT user_id FROM academic.students WHERE id=? AND school_id=? AND user_id IS NOT NULL AND status='ACTIVE'",
+                    (rs, i) -> UUID.fromString(rs.getString(1)), record.studentId(), schoolId));
         }
-        UUID schoolId = recordSchool(record.id());
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("studentId", record.studentId());
         data.put("category", record.category());
@@ -243,15 +242,17 @@ public class ConductService {
                 "CONDUCT_RECORD", record.id(), data);
     }
 
-    private UUID recordSchool(UUID id) {
-        return jdbc.queryForObject("SELECT school_id FROM conduct.records WHERE id=?", UUID.class, id);
-    }
-
-    private String visibilityPredicate(UUID schoolId, UUID actor) {
-        if (access.isPlatformAdmin(actor) || access.hasRole(schoolId, actor, "SCHOOL_ADMIN") || access.hasRole(schoolId, actor, "TEACHER")) {
+    private String visibilityPredicate(UUID schoolId, UUID studentId, UUID actor) {
+        if (access.isPlatformAdmin(actor) || access.hasRole(schoolId, actor, "SCHOOL_ADMIN") ||
+                access.isTeacherOfStudent(schoolId, actor, studentId)) {
             return "";
         }
-        if (access.hasRole(schoolId, actor, "PARENT")) {
+        boolean guardian = access.isGuardianOf(schoolId, actor, studentId);
+        boolean self = access.isStudentSelf(schoolId, actor, studentId);
+        if (guardian && self) {
+            return "AND r.visibility IN ('GUARDIAN','STUDENT','STUDENT_AND_GUARDIAN')";
+        }
+        if (guardian) {
             return "AND r.visibility IN ('GUARDIAN','STUDENT_AND_GUARDIAN')";
         }
         return "AND r.visibility IN ('STUDENT','STUDENT_AND_GUARDIAN')";
