@@ -3,17 +3,20 @@ import { api } from '../../api'
 import type { Row, StudentReport } from '../../app/types'
 import { AttendanceTrendChart, MiniBars, formatNumber } from '../../components/charts'
 import { Badge, Card, DataTable, Empty, SectionHeading, Stat, Status } from '../../components/ui'
+import { StudentTimeline } from '../timeline/StudentTimeline'
 
 export function StudentPage({ schoolId }: { schoolId: string }) {
   const [report, setReport] = useState<StudentReport | null>(null)
+  const [studentId, setStudentId] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    setLoading(true); setError('')
+    setLoading(true); setError(''); setStudentId('')
     void api<Row>(`/api/v1/schools/${schoolId}/me/student`).then(profile => {
       const id = String(profile.id || '')
       if (!id) throw new Error('Tài khoản chưa liên kết hồ sơ học sinh.')
+      setStudentId(id)
       return api<StudentReport>(`/api/v1/schools/${schoolId}/reports/students/${id}`)
     }).then(setReport).catch(err => setError((err as Error).message)).finally(() => setLoading(false))
   }, [schoolId])
@@ -38,6 +41,7 @@ export function StudentPage({ schoolId }: { schoolId: string }) {
     <section className="report-section"><SectionHeading eyebrow="Mới nhất" title="Kết quả & hoạt động" description="Chỉ hiển thị điểm đã được giáo viên công bố." /><div className="report-grid-main"><Card title="Điểm mới"><DataTable rows={report.recentScores} columns={[{ key: 'subjectName', label: 'Môn' }, { key: 'title', label: 'Bài đánh giá' }, { key: 'normalizedScore', label: 'Điểm /10', render: value => <strong>{formatNumber(value, 2)}</strong> }, { key: 'date', label: 'Ngày', render: value => formatDate(String(value ?? '')) }]} /></Card><Card title="Điểm danh gần đây"><DataTable rows={report.recentAttendance} columns={[{ key: 'date', label: 'Ngày', render: value => formatDate(String(value ?? '')) }, { key: 'subjectName', label: 'Môn' }, { key: 'period', label: 'Tiết' }, { key: 'status', label: 'Trạng thái', render: value => <AttendanceBadge value={String(value)} /> }]} /></Card></div></section>
 
     <Card title="Nhận xét từ giáo viên"><div className="comment-stream">{report.recentComments.length ? report.recentComments.map((row, index) => <article key={String(row.id || index)}><div className="comment-meta"><strong>{String(row.teacherName || 'Giáo viên')}</strong><time>{formatDateTime(String(row.createdAt || ''))}</time></div><p>{String(row.body || '')}</p></article>) : <p className="positive-empty">Chưa có nhận xét mới.</p>}</div></Card>
+    {studentId && <StudentTimeline schoolId={schoolId} studentId={studentId} />}
   </section>
 }
 
