@@ -211,29 +211,119 @@ Submission writes one `assessment.submitted.v1` domain event and one `student.sc
 
 ## Communication
 
+### Announcements
+
 ```text
 POST /schools/{schoolId}/announcements
 GET  /schools/{schoolId}/announcements
+```
 
+Create example:
+
+```json
+{
+  "title": "School notice",
+  "body": "Classes begin at 07:15 tomorrow.",
+  "targetType": "SCHOOL",
+  "targetId": null,
+  "expiresAt": null,
+  "pinned": true
+}
+```
+
+Targets are `SCHOOL` and `CLASSROOM`. School announcements require school-admin authority; classroom announcements require class-teacher/homeroom/admin resource authority. Expired announcements are excluded from normal audience reads, and pinned announcements sort first.
+
+### Teacher comments
+
+```text
 POST /schools/{schoolId}/students/{studentId}/comments
 GET  /schools/{schoolId}/students/{studentId}/comments
+```
 
+Supported visibility values:
+
+```text
+STAFF_ONLY
+GUARDIAN
+STUDENT_AND_GUARDIAN
+```
+
+Assigned/homeroom teachers or administrators create comments. Staff may inspect all authorized comments, linked guardians see guardian-visible comments, and students see only `STUDENT_AND_GUARDIAN` entries.
+
+### Conversations and messages
+
+```text
 POST /schools/{schoolId}/conversations
 GET  /schools/{schoolId}/conversations
 GET  /conversations/{id}/messages
+GET  /conversations/{id}/messages/page
 POST /conversations/{id}/messages
+POST /conversations/{id}/read
+PUT  /conversations/{id}/mute?muted=true|false
 ```
 
-Announcements support `SCHOOL` and `CLASSROOM` targets.
+Conversation creation accepts a subject and participant user IDs. The service does not allow arbitrary same-school messaging:
 
-## Notifications
+- school admins may communicate with active school members
+- parents may communicate with teachers responsible for a linked child, or an admin
+- teachers may communicate with students/guardians in their assigned or homeroom classes, or an admin
+- students may communicate with their assigned/homeroom teachers, or an admin
+
+Each participant maintains `last_read_at` and mute state. Conversation lists return `unread_count`. The legacy message list returns the newest bounded window in chronological order and marks it read. New clients should use keyset pagination:
 
 ```text
-GET  /notifications?limit=50
-POST /notifications/{id}/read
+GET /conversations/{id}/messages/page?limit=50
+GET /conversations/{id}/messages/page?limit=50&beforeCreatedAt=<timestamp>&beforeId=<uuid>
 ```
 
-Notifications are durable in PostgreSQL. Realtime is an additional delivery path rather than the only source of truth. Domain events are still persisted to the transactional outbox when the recipient list is empty.
+Muted participants retain durable message history but do not receive new-message notification fan-out until unmuted.
+
+## Internal notifications / in-app SMS
+
+The V1 "SMS" channel is the internal durable notification center plus optional realtime WebSocket delivery. External SMS Brandname, Zalo OA, email and mobile push are intentionally deferred delivery adapters.
+
+Backward-compatible feed:
+
+```text
+GET /notifications?limit=50
+```
+
+New API:
+
+```text
+GET  /notifications/page?schoolId=<uuid>&limit=50
+GET  /notifications/page?schoolId=<uuid>&category=ATTENDANCE&unreadOnly=true&limit=50
+GET  /notifications/unread-count?schoolId=<uuid>
+POST /notifications/{id}/read
+POST /notifications/read-all?schoolId=<uuid>
+GET  /notifications/preferences?schoolId=<uuid>
+PUT  /notifications/preferences/{category}?schoolId=<uuid>
+```
+
+Notification categories:
+
+```text
+ATTENDANCE
+LEAVE
+SCORE
+ANNOUNCEMENT
+COMMENT
+MESSAGE
+SYSTEM
+```
+
+Preference update example:
+
+```json
+{
+  "inAppEnabled": true,
+  "realtimeEnabled": false
+}
+```
+
+`inAppEnabled` controls whether a durable notification row is created for that user/category. `realtimeEnabled` controls whether the user is placed in the event envelope's realtime recipient list. The underlying domain event is still written to the transactional outbox even when there are no realtime recipients.
+
+Notification pagination uses the same `(created_at,id)` keyset pattern as message/revision history. `beforeCreatedAt` and `beforeId` must be supplied together.
 
 ## Realtime
 
@@ -261,6 +351,8 @@ eclassroom.assessment.submitted.v1
 eclassroom.student.score.published.v1
 eclassroom.assessment.locked.v1
 eclassroom.announcement.published.v1
+eclassroom.teacher-comment.created.v1
+eclassroom.message.created.v1
 ```
 
 ## Reporting
@@ -295,7 +387,9 @@ Sensitive attendance and score mutations are captured by append-only database au
 | View student records | Yes | Assigned students | Linked child | Self |
 | Publish school announcement | Yes | No | No | No |
 | Publish class announcement | Yes | Assigned class | No | No |
-| Receive notifications | Yes | Yes | Yes | Yes |
+| Create teacher comment | Yes | Assigned students | No | No |
+| Start conversation | Yes | Related members | Related teachers/admin | Related teachers/admin |
+| Receive internal notifications | Yes | Yes | Yes | Yes |
 
 ## Error contract
 
