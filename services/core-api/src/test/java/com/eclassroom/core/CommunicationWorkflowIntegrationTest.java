@@ -102,7 +102,7 @@ class CommunicationWorkflowIntegrationTest {
         String payload = String.valueOf(durableEvent.get("payload"));
         assertTrue(payload.contains("targetRecipientIds"));
         assertTrue(payload.contains(parent.toString()));
-        assertTrue(payload.contains("\"recipientIds\":[]") || payload.contains("\"recipientIds\" : []"));
+        assertTrue(payload.contains("\"recipients\": []") || payload.contains("\"recipients\":[]"));
     }
 
     @Test
