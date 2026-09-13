@@ -113,7 +113,7 @@ public class LeaveRequestService {
         int reconciled = 0;
         if (approve) {
             reconciled = jdbc.update(
-                    "UPDATE attendance.records ar SET status='EXCUSED',marked_by=?,marked_at=NOW(),version=version+1 " +
+                    "UPDATE attendance.records ar SET status='EXCUSED',marked_by=?,marked_at=NOW(),version=ar.version+1 " +
                             "FROM attendance.sessions s WHERE ar.attendance_session_id=s.id AND ar.student_id=? " +
                             "AND s.school_id=? AND s.attendance_date BETWEEN ? AND ? AND ar.status='ABSENT'",
                     reviewer, studentId, schoolId, start, end);
