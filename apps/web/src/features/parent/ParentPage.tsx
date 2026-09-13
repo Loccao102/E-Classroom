@@ -3,6 +3,7 @@ import { api } from '../../api'
 import type { Row, Student, StudentReport } from '../../app/types'
 import { AttendanceTrendChart, MiniBars, formatNumber } from '../../components/charts'
 import { Badge, Card, DataTable, DialogForm, Field, Modal, SectionHeading, Stat, Status } from '../../components/ui'
+import { StudentTimeline } from '../timeline/StudentTimeline'
 
 export function ParentPage({ schoolId, onOpenMessages }: { schoolId: string; onOpenMessages?: () => void }) {
   const [children, setChildren] = useState<Student[]>([])
@@ -39,6 +40,7 @@ export function ParentPage({ schoolId, onOpenMessages }: { schoolId: string; onO
     <SectionHeading eyebrow="Gia đình" title={child ? `Theo dõi ${child.full_name}` : 'Theo dõi con'} description="Những điều quan trọng về chuyên cần, kết quả học tập và phản hồi từ giáo viên." actions={<><select value={selected} onChange={event => setSelected(event.target.value)}>{children.map(item => <option key={item.id} value={item.id}>{item.full_name} · {item.classroom_name || 'Chưa xếp lớp'}</option>)}</select><button onClick={onOpenMessages}>Nhắn giáo viên</button><button className="primary" disabled={!selected} onClick={() => setLeaveOpen(true)}>Xin nghỉ học</button></>} />
     <Status>{message}</Status><Status tone="error">{error}</Status>
     {loading && !report ? <FamilySkeleton /> : report && <FamilyReport report={report} leaveRows={leaveRows} />}
+    {selected && <StudentTimeline schoolId={schoolId} studentId={selected} />}
     <LeaveModal open={leaveOpen} onClose={() => setLeaveOpen(false)} schoolId={schoolId} studentId={selected} onSaved={async () => { setLeaveOpen(false); setMessage('Đã gửi đơn xin nghỉ tới giáo viên chủ nhiệm.'); await loadChild() }} />
   </section>
 }
