@@ -44,12 +44,12 @@ public class AccountSecurityService {
         String temporaryPassword = generateTemporaryPassword();
         jdbc.update(
                 "UPDATE identity.users SET password_hash=?,must_change_password=TRUE,password_changed_at=NOW()," +
-                        "token_version=token_version+1,status='ACTIVE',updated_at=NOW() WHERE id=?",
+                        "token_version=token_version+1,updated_at=NOW() WHERE id=?",
                 passwords.encode(temporaryPassword), targetUserId);
         auth.revokeAll(targetUserId, "ADMIN_PASSWORD_RESET");
         events.record(actor, schoolId, "ADMIN_PASSWORD_RESET", "SUCCESS", null,
-                Map.of("targetUserId", targetUserId.toString(), "targetRole", target.role()));
-        return new TemporaryPasswordResult(targetUserId, temporaryPassword, true);
+                Map.of("targetUserId", targetUserId.toString(), "targetRole", target.role(), "accountStatus", target.status()));
+        return new TemporaryPasswordResult(targetUserId, temporaryPassword, true, target.status());
     }
 
     @Transactional
@@ -100,6 +100,6 @@ public class AccountSecurityService {
 
     private record ManagedAccount(UUID id, String role, String platformRole, String status, int membershipCount) {}
 
-    public record TemporaryPasswordResult(UUID userId, String temporaryPassword, boolean mustChangePassword) {}
+    public record TemporaryPasswordResult(UUID userId, String temporaryPassword, boolean mustChangePassword, String accountStatus) {}
     public record AccountStatusResult(UUID userId, String status) {}
 }
