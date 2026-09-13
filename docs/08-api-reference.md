@@ -113,7 +113,29 @@ POST /leave-requests/{id}/approve
 POST /leave-requests/{id}/reject
 ```
 
-Approved leave requests reconcile matching `ABSENT` records to `EXCUSED`.
+Submit example:
+
+```json
+{
+  "startDate": "2026-09-14",
+  "endDate": "2026-09-15",
+  "reason": "Fever"
+}
+```
+
+Rules:
+
+- only an active linked guardian may submit for the student
+- `reason` is required and limited to 1000 characters
+- active `SUBMITTED`/`APPROVED` requests may not overlap for the same student
+- only the current homeroom teacher or school admin may review
+- review is a single terminal transition: `SUBMITTED -> APPROVED|REJECTED`
+- competing/double review returns `LEAVE_ALREADY_REVIEWED`
+- approved leave reconciles only matching `ABSENT` records to `EXCUSED`
+- rejected leave never mutates attendance
+- leave rows maintain a monotonically increasing `version`
+
+Submission creates a durable reviewer notification when reviewers exist and always writes a versioned `student.leave-request.submitted` outbox event. Review writes `student.leave-request.reviewed`; guardian notification and realtime delivery reuse the same event envelope.
 
 ## Assessments and grading
 
@@ -152,7 +174,7 @@ GET  /notifications?limit=50
 POST /notifications/{id}/read
 ```
 
-Notifications are durable in PostgreSQL. Realtime is an additional delivery path rather than the only source of truth.
+Notifications are durable in PostgreSQL. Realtime is an additional delivery path rather than the only source of truth. Domain events are still persisted to the transactional outbox when the recipient list is empty.
 
 ## Realtime
 
@@ -174,6 +196,8 @@ Examples:
 
 ```text
 eclassroom.student.attendance.changed.v1
+eclassroom.student.leave-request.submitted.v1
+eclassroom.student.leave-request.reviewed.v1
 eclassroom.student.score.changed.v1
 eclassroom.announcement.published.v1
 ```
@@ -194,7 +218,7 @@ The current risk engine is explicit and explainable. It uses absence ratio and s
 GET /schools/{schoolId}/audit/{entityType}/{entityId}
 ```
 
-Sensitive attendance and score mutations are captured by append-only database audit triggers.
+Sensitive attendance and score mutations are captured by append-only database audit triggers. Workflow-level audit entries such as leave submit/approve/reject are appended by the transactional service and include the current correlation ID.
 
 ## Core role matrix
 

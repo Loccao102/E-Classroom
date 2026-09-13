@@ -107,15 +107,27 @@ Teacher marks Student A ABSENT
 
 ## Phase 4 — Leave-request workflow
 
+Status: implemented and validated through the Phase 4 delivery PR.
+
 Deliver:
 
 ```text
 Parent submits request
- -> homeroom teacher reviews
- -> approve/reject
- -> approved request may reconcile ABSENT -> EXCUSED
- -> audit + event + parent notification
+ -> homeroom teacher/admin receives a durable notification
+ -> approve/reject exactly once
+ -> approved request reconciles matching ABSENT -> EXCUSED
+ -> leave + attendance changes are auditable
+ -> versioned submitted/reviewed events enter the transactional outbox
+ -> guardian receives the review result through durable + realtime notification paths
 ```
+
+Engineering guarantees:
+
+- per-student serialization prevents overlapping active leave requests
+- review transition is concurrency-safe (`SUBMITTED -> APPROVED|REJECTED`)
+- only matching `ABSENT` attendance records in the approved school/date range are reconciled
+- audit and outbox records carry the request correlation ID
+- PostgreSQL/Testcontainers covers approve, reject, authorization and competing reviewers
 
 This phase validates workflow transitions and cross-aggregate policy.
 
