@@ -2,6 +2,7 @@ package com.eclassroom.core;
 
 import com.eclassroom.core.identity.AccessService;
 import com.eclassroom.core.identity.AuthService;
+import com.eclassroom.core.identity.SecurityEventService;
 import com.eclassroom.core.integration.OutboxService;
 import com.eclassroom.core.shared.api.ApiException;
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
@@ -92,9 +93,12 @@ class PlatformPostgresIntegrationTest {
         byte[] secretBytes = "01234567890123456789012345678901".getBytes(StandardCharsets.UTF_8);
         SecretKey secretKey = new SecretKeySpec(secretBytes, "HmacSHA256");
         JwtEncoder encoder = new NimbusJwtEncoder(new ImmutableSecret<>(secretKey));
-        AuthService auth = new AuthService(jdbc, passwordEncoder, encoder, "eclassroom-test", 15, 30);
+        SecurityEventService securityEvents = new SecurityEventService(jdbc, JsonMapper.builder().build());
+        AuthService auth = new AuthService(jdbc, passwordEncoder, encoder, securityEvents,
+                "eclassroom-test", 15, 30, 5, 10, 15);
+        AuthService.ClientContext client = auth.clientContext("JUnit Chrome on Linux", "127.0.0.1");
 
-        AuthService.TokenResponse tokens = auth.login(email, rawPassword);
+        AuthService.TokenResponse tokens = auth.login(email, rawPassword, client);
 
         assertFalse(tokens.accessToken().isBlank());
         assertFalse(tokens.refreshToken().isBlank());
@@ -104,7 +108,11 @@ class PlatformPostgresIntegrationTest {
                 Integer.class,
                 userId);
         assertEquals(1, refreshRows);
-        assertThrows(ApiException.class, () -> auth.login(email, "wrong-password"));
+        assertThrows(ApiException.class, () -> auth.login(email, "wrong-password", client));
+        Integer failedAttempts = jdbc.queryForObject(
+                "SELECT COALESCE(MAX(failed_count),0) FROM identity.login_attempts",
+                Integer.class);
+        assertEquals(1, failedAttempts);
     }
 
     @Test

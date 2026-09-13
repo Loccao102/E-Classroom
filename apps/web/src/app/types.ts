@@ -8,8 +8,26 @@ export type Membership = {
 }
 
 export type CurrentUser = {
-  user: { id: string; email: string; full_name: string; platform_role: string }
+  user: {
+    id: string
+    email: string
+    full_name: string
+    platform_role: string
+    status: string
+    must_change_password: boolean
+    password_changed_at?: string | null
+  }
   memberships: Membership[]
+}
+
+export type SecuritySession = {
+  sessionId: string
+  createdAt: string
+  lastSeenAt: string
+  expiresAt: string
+  active: boolean
+  current: boolean
+  deviceLabel: string
 }
 
 export type TeachingAssignment = {

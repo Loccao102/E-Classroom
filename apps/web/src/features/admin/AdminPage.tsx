@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { api } from '../../api'
 import type { Row } from '../../app/types'
 import { Card, DataTable, DialogForm, Field, Modal, SectionHeading, Status } from '../../components/ui'
+import { AccountManagementPanel } from './AccountManagementPanel'
 import { SetupWizard, type SetupKind } from './SetupWizard'
 
 type CreateKind = 'student' | 'teacher' | 'guardian' | 'subject'
@@ -46,6 +47,8 @@ export function AdminPage({ schoolId }: { schoolId: string }) {
 
     <section className="setup-journey" aria-labelledby="setup-title"><div className="setup-copy"><p className="eyebrow">Guided setup</p><h3 id="setup-title">Từ dữ liệu rời rạc thành một lớp học hoạt động</h3><p>Đi theo thứ tự gợi ý khi khởi tạo trường mới, hoặc mở bất kỳ bước nào để bổ sung dữ liệu.</p></div><div className="setup-steps">{setupSteps.map(item => <button key={item.kind} onClick={() => setSetupKind(item.kind)}><span>{item.step}</span><div><strong>{item.title}</strong><small>{item.copy}</small></div><em>→</em></button>)}</div></section>
 
+    <AccountManagementPanel schoolId={schoolId} />
+
     <section className="resource-browser"><div className="resource-toolbar"><div><span className="eyebrow">Dữ liệu hiện có</span><h3>{resourceLabel}</h3></div><div className="inline-actions"><select value={resource} onChange={event => setResource(event.target.value)}>{resources.map(([value,label]) => <option key={value} value={value}>{label}</option>)}</select><button onClick={() => void load()}>{loading ? 'Đang tải…' : 'Làm mới'}</button></div></div>
       <Card title={`${rows.length} bản ghi`}>{loading && !rows.length ? <div className="skeleton-block" /> : <DataTable rows={rows} />}</Card>
     </section>
@@ -85,6 +88,6 @@ function CreateResourceModal({ schoolId, kind, onClose, onSaved }: { schoolId: s
     {(kind === 'student' || kind === 'teacher' || kind === 'subject') && <Field label={kind === 'subject' ? 'Mã môn học' : 'Mã hồ sơ'}><input required value={code} onChange={event => setCode(event.target.value)} /></Field>}
     <Field label={kind === 'subject' ? 'Tên môn học' : 'Họ và tên'}><input required value={fullName} onChange={event => setFullName(event.target.value)} /></Field>
     {kind === 'student' && <div className="form-grid"><Field label="Ngày sinh"><input type="date" value={dateOfBirth} onChange={event => setDateOfBirth(event.target.value)} /></Field><Field label="Giới tính"><select value={gender} onChange={event => setGender(event.target.value)}><option value="">Chưa chọn</option><option value="MALE">Nam</option><option value="FEMALE">Nữ</option><option value="OTHER">Khác</option></select></Field></div>}
-    {kind !== 'subject' && <><div className="form-grid"><Field label="Email đăng nhập" hint="Có thể để trống nếu chưa cấp tài khoản."><input type="email" value={email} onChange={event => setEmail(event.target.value)} /></Field>{kind !== 'student' && <Field label="Số điện thoại"><input value={phone} onChange={event => setPhone(event.target.value)} /></Field>}</div>{email && <Field label="Mật khẩu ban đầu"><input required type="password" minLength={8} value={password} onChange={event => setPassword(event.target.value)} /></Field>}</>}
+    {kind !== 'subject' && <><div className="form-grid"><Field label="Email đăng nhập" hint="Có thể để trống nếu chưa cấp tài khoản."><input type="email" value={email} onChange={event => setEmail(event.target.value)} /></Field>{kind !== 'student' && <Field label="Số điện thoại"><input value={phone} onChange={event => setPhone(event.target.value)} /></Field>}</div>{email && <Field label="Mật khẩu ban đầu" hint="Tối thiểu 10 ký tự, có chữ hoa, chữ thường và số."><input required type="password" minLength={10} maxLength={128} value={password} onChange={event => setPassword(event.target.value)} /></Field>}</>}
   </DialogForm></Modal>
 }

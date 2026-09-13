@@ -7,8 +7,11 @@ import (
 )
 
 type Claims struct {
-	Email string `json:"email"`
-	Name  string `json:"name"`
+	Email              string `json:"email"`
+	Name               string `json:"name"`
+	SessionID          string `json:"sid"`
+	TokenVersion       int64  `json:"tokenVersion"`
+	MustChangePassword bool   `json:"mustChangePassword"`
 	jwt.RegisteredClaims
 }
 
@@ -20,7 +23,7 @@ func Verify(raw, secret, issuer string) (Claims, error) {
 		}
 		return []byte(secret), nil
 	}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}), jwt.WithIssuer(issuer), jwt.WithExpirationRequired())
-	if err != nil || !token.Valid || claims.Subject == "" {
+	if err != nil || !token.Valid || claims.Subject == "" || claims.SessionID == "" || claims.MustChangePassword {
 		return Claims{}, errors.New("invalid token")
 	}
 	return claims, nil

@@ -32,6 +32,10 @@ app:
     issuer: ${APP_JWT_ISSUER:eclassroom}
     access-minutes: ${APP_ACCESS_MINUTES:15}
     refresh-days: ${APP_REFRESH_DAYS:30}
+  auth:
+    max-failed-attempts: ${APP_LOGIN_MAX_FAILED_ATTEMPTS:5}
+    attempt-window-minutes: ${APP_LOGIN_ATTEMPT_WINDOW_MINUTES:10}
+    lock-minutes: ${APP_LOGIN_LOCK_MINUTES:15}
   nats:
     url: ${NATS_URL:nats://localhost:4222}
   bootstrap:
