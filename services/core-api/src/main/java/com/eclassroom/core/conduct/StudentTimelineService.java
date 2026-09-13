@@ -45,7 +45,7 @@ public class StudentTimelineService {
             throw ApiException.badRequest("INVALID_DATE_RANGE", "toDate must be on or after fromDate");
         }
         Set<String> types = normalizeTypes(requestedTypes);
-        Set<String> visibilities = allowedVisibilities(schoolId, actor);
+        Set<String> visibilities = allowedVisibilities(schoolId, studentId, actor);
         String timezone = jdbc.queryForObject("SELECT timezone FROM school.schools WHERE id=?", String.class, schoolId);
         ZoneId zone = ZoneId.of(timezone == null || timezone.isBlank() ? "UTC" : timezone);
 
@@ -153,16 +153,19 @@ public class StudentTimelineService {
         return new TimelinePage(items, next);
     }
 
-    private Set<String> allowedVisibilities(UUID schoolId, UUID actor) {
-        if (access.isPlatformAdmin(actor) || access.hasRole(schoolId, actor, "SCHOOL_ADMIN") || access.hasRole(schoolId, actor, "TEACHER")) {
+    private Set<String> allowedVisibilities(UUID schoolId, UUID studentId, UUID actor) {
+        if (access.isPlatformAdmin(actor) || access.hasRole(schoolId, actor, "SCHOOL_ADMIN") ||
+                access.isTeacherOfStudent(schoolId, actor, studentId)) {
             return Set.of("STAFF_ONLY", "GUARDIAN", "STUDENT", "STUDENT_AND_GUARDIAN");
         }
         LinkedHashSet<String> allowed = new LinkedHashSet<>();
-        if (access.hasRole(schoolId, actor, "PARENT")) {
-            allowed.add("GUARDIAN"); allowed.add("STUDENT_AND_GUARDIAN");
+        if (access.isGuardianOf(schoolId, actor, studentId)) {
+            allowed.add("GUARDIAN");
+            allowed.add("STUDENT_AND_GUARDIAN");
         }
-        if (access.hasRole(schoolId, actor, "STUDENT")) {
-            allowed.add("STUDENT"); allowed.add("STUDENT_AND_GUARDIAN");
+        if (access.isStudentSelf(schoolId, actor, studentId)) {
+            allowed.add("STUDENT");
+            allowed.add("STUDENT_AND_GUARDIAN");
         }
         return allowed;
     }
