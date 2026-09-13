@@ -133,22 +133,43 @@ This phase validates workflow transitions and cross-aggregate policy.
 
 ## Phase 5 — Assessments and grading
 
+Status: implemented by the Phase 5 delivery PR and considered complete only after all CI gates pass.
+
 Deliver:
 
-- assessment categories
-- assessment lifecycle
-- bulk score entry
+- validated assessment metadata and semester/assignment consistency
+- explicit `DRAFT -> SUBMITTED -> LOCKED` lifecycle
+- optimistic workflow versioning with backward-compatible atomic transitions
+- bounded bulk score validation and batch writes
 - configurable weights
-- score revision history
-- submit / lock workflow
-- student/parent score views
-- score-change notification event
+- append-only score revision history with correlation IDs
+- keyset-paginated revision API
+- staff assessment-score view
+- student/guardian views restricted to published scores
+- idempotent submit/lock behavior
+- durable score publication notifications and assessment events
 
-Performance focus:
+Performance guarantees:
 
-- avoid N+1 queries
-- batch validation/writes
-- keyset pagination for revision history
+- score validation never performs one enrollment query per student
+- existing scores are loaded in one bounded query per batch
+- score upserts and revision writes use JDBC batching
+- numeric no-op updates do not increment score versions or create revision rows
+- revision history uses `(created_at, id)` keyset pagination rather than unbounded offsets
+
+Workflow guarantees:
+
+```text
+Teacher creates DRAFT assessment
+ -> bulk enters scores
+ -> revisions are recorded only for real changes
+ -> submit atomically publishes scores once
+ -> guardians receive durable/realtime score notifications once
+ -> school admin locks the assessment
+ -> later score mutation is rejected
+```
+
+PostgreSQL/Testcontainers covers metadata validation, batch behavior, authorization, revision cursors, draft visibility, version conflicts, idempotent submission and locking.
 
 ## Phase 6 — Communication
 
