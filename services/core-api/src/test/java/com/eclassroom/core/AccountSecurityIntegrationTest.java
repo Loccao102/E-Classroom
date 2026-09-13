@@ -7,6 +7,7 @@ import com.eclassroom.core.identity.SecurityEventService;
 import com.eclassroom.core.shared.api.ApiException;
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
@@ -24,8 +25,6 @@ import org.springframework.test.context.junit.jupiter.SpringJUnitConfig;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
 import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 import tools.jackson.databind.json.JsonMapper;
 
 import javax.crypto.SecretKey;
@@ -41,15 +40,18 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-@Testcontainers
 @SpringJUnitConfig(AccountSecurityIntegrationTest.TestConfig.class)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class AccountSecurityIntegrationTest {
-    @Container
-    static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:17-alpine")
-            .withDatabaseName("eclassroom_security_test")
-            .withUsername("eclassroom")
-            .withPassword("eclassroom");
+    static final PostgreSQLContainer<?> POSTGRES;
+
+    static {
+        POSTGRES = new PostgreSQLContainer<>("postgres:17-alpine")
+                .withDatabaseName("eclassroom_security_test")
+                .withUsername("eclassroom")
+                .withPassword("eclassroom");
+        POSTGRES.start();
+    }
 
     private final JdbcTemplate jdbc;
     private final PasswordEncoder passwords;
@@ -67,6 +69,11 @@ class AccountSecurityIntegrationTest {
         this.auth = auth;
         this.accounts = accounts;
         this.client = auth.clientContext("Mozilla/5.0 Chrome/152 Windows", "127.0.0.1");
+    }
+
+    @AfterAll
+    void stopDatabase() {
+        POSTGRES.stop();
     }
 
     @BeforeEach
