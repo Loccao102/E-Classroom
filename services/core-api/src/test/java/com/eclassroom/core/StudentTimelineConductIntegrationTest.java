@@ -236,6 +236,11 @@ class StudentTimelineConductIntegrationTest {
         UUID unrelatedTeacherUser = user(prefix + "-other", school, "TEACHER");
         UUID parentUser = user(prefix + "-parent", school, "PARENT");
         UUID studentUser = user(prefix + "-student", school, "STUDENT");
+        jdbc.update("INSERT INTO identity.school_memberships(user_id,school_id,role,status) VALUES (?,?, 'TEACHER','ACTIVE')",
+                parentUser, school);
+        UUID parentTeacher = UUID.randomUUID();
+        jdbc.update("INSERT INTO academic.teachers(id,school_id,user_id,teacher_code,full_name,status) VALUES (?,?,?,?,?,'ACTIVE')",
+                parentTeacher, school, parentUser, "TP-" + prefix, "Parent Teacher " + prefix);
 
         UUID year = UUID.randomUUID();
         jdbc.update("INSERT INTO academic.academic_years(id,school_id,name,start_date,end_date,status) VALUES (?,?,?,?,?,'ACTIVE')",
