@@ -22,6 +22,7 @@ import tools.jackson.databind.json.JsonMapper;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.HashSet;
 import java.util.List;
@@ -182,9 +183,10 @@ class StudentTimelineConductIntegrationTest {
         first.items().forEach(item -> assertTrue(seen.add(item.id())));
         second.items().forEach(item -> assertTrue(seen.add(item.id())));
 
+        LocalDate schoolDay = base.atZoneSameInstant(ZoneId.of("Asia/Bangkok")).toLocalDate();
         StudentTimelineService.TimelinePage filtered = timeline.page(
                 f.schoolId(), f.studentId(), f.parentUser(), 20, null, null,
-                base.toLocalDate(), base.toLocalDate(), List.of("CONDUCT"));
+                schoolDay, schoolDay, List.of("CONDUCT"));
         assertTrue(filtered.items().size() >= 1);
         assertTrue(filtered.items().stream().allMatch(item -> item.type().equals("CONDUCT")));
     }
