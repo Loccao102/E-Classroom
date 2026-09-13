@@ -44,6 +44,8 @@ Visibility is then applied on top of resource authorization:
 | `STUDENT` | Yes | No | Yes |
 | `STUDENT_AND_GUARDIAN` | Yes | Yes | Yes |
 
+Multi-role accounts are resolved against the **relationship to the requested student**, not by granting the union of every school-wide role. For example, an account that is both a parent and a teacher only receives staff-only visibility for a child when that teacher is actually assigned to that student. Being a teacher somewhere else in the same school does not elevate the guardian view.
+
 ## Notifications and events
 
 Create/update emits the domain event even when no family recipient exists:
@@ -78,7 +80,7 @@ ANNOUNCEMENT
 
 Only published/locked scores appear. Draft scores never enter the family/student timeline.
 
-Teacher-comment and conduct visibility is applied before rows are returned. School/class announcements are included when the student belongs or belonged to the target class.
+Teacher-comment and conduct visibility is applied before rows are returned. School-wide announcements are visible to authorized student viewers. Class-targeted announcements are included only when their publication date falls inside one of the student's enrollment intervals for that class, using the school's configured timezone.
 
 ### Pagination
 
@@ -178,6 +180,7 @@ PostgreSQL/Testcontainers coverage verifies:
 
 - staff/guardian/student visibility boundaries
 - unrelated teacher denial
+- multi-role accounts cannot use an unrelated teacher role to elevate a guardian view
 - notification audience derivation
 - optimistic stale-write rejection
 - append-only revision and correlated audit entries
