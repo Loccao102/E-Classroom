@@ -43,6 +43,69 @@ export type LeaveRequest = { id: string; student_name: string; start_date: strin
 export type Preference = { category: string; inAppEnabled: boolean; realtimeEnabled: boolean }
 export type NotificationPage = { items: Row[]; nextCursor?: { beforeCreatedAt: string; beforeId: string } | null }
 
+export type Meeting = {
+  id: string
+  schoolId: string
+  scopeType: 'SCHOOL' | 'CLASSROOM' | 'STUDENT' | string
+  scopeId?: string | null
+  title: string
+  agenda: string
+  note?: string | null
+  location: string
+  startsAt: string
+  endsAt: string
+  includeStudents: boolean
+  status: 'SCHEDULED' | 'CANCELLED' | 'COMPLETED' | string
+  createdBy: string
+  version: number
+  createdAt: string
+  updatedAt: string
+}
+
+export type MeetingInvitee = {
+  id: string
+  meetingId: string
+  guardianUserId: string
+  studentId: string
+  guardianName: string
+  studentName: string
+  response: 'PENDING' | 'ACCEPTED' | 'DECLINED' | string
+  respondedAt?: string | null
+  attendance: 'UNKNOWN' | 'PRESENT' | 'ABSENT' | string
+  attendanceRecordedAt?: string | null
+  lastRemindedAt?: string | null
+  version: number
+}
+
+export type MeetingSlot = {
+  id: string
+  startsAt: string
+  endsAt: string
+  available: boolean
+  version: number
+  mine: boolean
+  guardianUserId?: string | null
+  studentId?: string | null
+}
+
+export type MeetingOutcome = {
+  id: string
+  studentId?: string | null
+  studentName?: string | null
+  body: string
+  visibility: string
+  recordedByName: string
+  createdAt: string
+}
+
+export type MeetingDetails = {
+  meeting: Meeting
+  invitees: MeetingInvitee[]
+  slots: MeetingSlot[]
+  outcomes: MeetingOutcome[]
+  manageable: boolean
+}
+
 export type ReportRange = {
   from: string
   to: string
