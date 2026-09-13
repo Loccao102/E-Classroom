@@ -177,21 +177,27 @@ function Student({ schoolId }: { schoolId: string }) {
 function Communication({ schoolId, canPublish }: { schoolId: string; canPublish: boolean }) {
   const [announcements, setAnnouncements] = useState<Row[]>([])
   const [conversations, setConversations] = useState<Row[]>([])
+  const [contacts, setContacts] = useState<Row[]>([])
   const [selected, setSelected] = useState('')
   const [messages, setMessages] = useState<Row[]>([])
   const [announcementTitle, setAnnouncementTitle] = useState('')
   const [announcementBody, setAnnouncementBody] = useState('')
   const [announcementPinned, setAnnouncementPinned] = useState(false)
+  const [newContact, setNewContact] = useState('')
+  const [newSubject, setNewSubject] = useState('')
   const [messageBody, setMessageBody] = useState('')
   const [status, setStatus] = useState('')
 
   const load = async () => {
-    const [noticeRows, conversationRows] = await Promise.all([
+    const [noticeRows, conversationRows, contactRows] = await Promise.all([
       api<Row[]>(`/api/v1/schools/${schoolId}/announcements`),
-      api<Row[]>(`/api/v1/schools/${schoolId}/conversations`).catch(() => [] as Row[])
+      api<Row[]>(`/api/v1/schools/${schoolId}/conversations`).catch(() => [] as Row[]),
+      api<Row[]>(`/api/v1/schools/${schoolId}/communication/contacts`).catch(() => [] as Row[])
     ])
     setAnnouncements(noticeRows)
     setConversations(conversationRows)
+    setContacts(contactRows)
+    if (!newContact && contactRows[0]) setNewContact(String(contactRows[0].user_id))
   }
 
   useEffect(() => { void load() }, [schoolId])
@@ -209,6 +215,15 @@ function Communication({ schoolId, canPublish }: { schoolId: string; canPublish:
     try {
       await api(`/api/v1/schools/${schoolId}/announcements`, { method: 'POST', body: JSON.stringify({ title: announcementTitle, body: announcementBody, targetType: 'SCHOOL', targetId: null, pinned: announcementPinned }) })
       setAnnouncementTitle(''); setAnnouncementBody(''); setAnnouncementPinned(false); setStatus('Announcement published'); await load()
+    } catch (err) { setStatus((err as Error).message) }
+  }
+
+  const startConversation = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!newContact) return
+    try {
+      const result = await api<{ id: string }>(`/api/v1/schools/${schoolId}/conversations`, { method: 'POST', body: JSON.stringify({ subject: newSubject || null, participantIds: [newContact] }) })
+      setNewSubject(''); setSelected(result.id); setStatus('Conversation created'); await load()
     } catch (err) { setStatus((err as Error).message) }
   }
 
@@ -236,6 +251,12 @@ function Communication({ schoolId, canPublish }: { schoolId: string; canPublish:
     <div className="cards">{announcements.length ? announcements.map(row => <article key={row.id} className="announcement">
       <small>{row.pinned ? 'Pinned · ' : ''}{new Date(row.published_at).toLocaleString()}</small><h3>{row.title}</h3><p>{row.body}</p>
     </article>) : <Empty text="No announcements yet" />}</div>
+
+    <Card title="Start a conversation"><form className="new-conversation-form" onSubmit={startConversation}>
+      <label>Contact<select value={newContact} onChange={e => setNewContact(e.target.value)}><option value="">Choose an allowed contact</option>{contacts.map(contact => <option key={contact.user_id} value={contact.user_id}>{contact.full_name} · {contact.roles || contact.email}</option>)}</select></label>
+      <label>Subject<input value={newSubject} onChange={e => setNewSubject(e.target.value)} maxLength={255} placeholder="Optional subject" /></label>
+      <button className="primary" type="submit" disabled={!newContact}>Start conversation</button>
+    </form><p className="hint">Only people allowed by your school relationship are shown here.</p></Card>
 
     <Card title="Messages"><div className="communication-grid">
       <div className="conversation-list">{conversations.length ? conversations.map(conversation => <button key={conversation.id} className={selected === String(conversation.id) ? 'conversation active' : 'conversation'} onClick={() => setSelected(String(conversation.id))}>
