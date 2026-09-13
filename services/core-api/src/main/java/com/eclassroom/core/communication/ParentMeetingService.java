@@ -108,8 +108,14 @@ public class ParentMeetingService {
 
         MeetingView created = requireMeeting(meetingId);
         audit.append(schoolId, actor, "CREATE", "PARENT_MEETING", meetingId, null,
-                Map.of("scopeType", scope, "scopeId", command.scopeId(), "studentCount", students.size(),
-                        "inviteeCount", invitees.size(), "slotCount", slots.size(), "startsAt", startsAt, "endsAt", endsAt), null);
+                auditMap(
+                        "scopeType", scope,
+                        "scopeId", command.scopeId(),
+                        "studentCount", students.size(),
+                        "inviteeCount", invitees.size(),
+                        "slotCount", slots.size(),
+                        "startsAt", startsAt,
+                        "endsAt", endsAt), null);
         notifyMeetingAudience(created, "meeting.invited", "Lời mời họp phụ huynh",
                 title + " · " + location, Map.of("action", "INVITATION"));
         return meetingId;
@@ -177,8 +183,8 @@ public class ParentMeetingService {
         }
         InviteeView next = requireInviteeById(current.id(), false);
         audit.append(meeting.schoolId(), actor, "RESPOND", "MEETING_INVITEE", current.id(),
-                Map.of("response", current.response(), "version", current.version()),
-                Map.of("response", next.response(), "version", next.version()), null);
+                auditMap("response", current.response(), "version", current.version()),
+                auditMap("response", next.response(), "version", next.version()), null);
         notifyCreator(meeting, "meeting.response.updated", "Phản hồi lời mời họp",
                 next.guardianName() + " đã phản hồi: " + next.response(), Map.of("studentId", studentId));
         return next;
@@ -198,7 +204,7 @@ public class ParentMeetingService {
             throw ApiException.conflict("VERSION_CONFLICT", "Meeting slot changed; reload before booking");
         }
         if (actor.equals(slot.guardianUserId()) && studentId.equals(slot.studentId())) {
-            return slotView(slot, true, true);
+            return slotView(slot, false, true);
         }
         if (slot.guardianUserId() != null) {
             throw ApiException.conflict("MEETING_SLOT_BOOKED", "This meeting slot has already been booked");
@@ -214,10 +220,10 @@ public class ParentMeetingService {
         }
         SlotRow next = requireSlot(meetingId, slotId, false);
         audit.append(meeting.schoolId(), actor, "BOOK_SLOT", "MEETING_SLOT", slotId, null,
-                Map.of("studentId", studentId, "startsAt", next.startsAt(), "endsAt", next.endsAt()), null);
+                auditMap("studentId", studentId, "startsAt", next.startsAt(), "endsAt", next.endsAt()), null);
         notifyCreator(meeting, "meeting.slot.booked", "Đã đặt lịch trao đổi",
                 invitee.guardianName() + " đã đặt khung giờ", Map.of("studentId", studentId, "slotId", slotId));
-        return slotView(next, true, true);
+        return slotView(next, false, true);
     }
 
     @Transactional
@@ -240,10 +246,10 @@ public class ParentMeetingService {
         if (updated != 1) throw ApiException.conflict("VERSION_CONFLICT", "Meeting slot changed; reload before cancelling");
         SlotRow next = requireSlot(meetingId, slotId, false);
         audit.append(meeting.schoolId(), actor, "CANCEL_SLOT", "MEETING_SLOT", slotId,
-                Map.of("studentId", studentId), Map.of("available", true), null);
+                auditMap("studentId", studentId), auditMap("available", true), null);
         notifyCreator(meeting, "meeting.slot.cancelled", "Đã huỷ khung giờ",
                 "Phụ huynh đã huỷ khung giờ trao đổi", Map.of("studentId", studentId, "slotId", slotId));
-        return slotView(next, true, true);
+        return slotView(next, false, false);
     }
 
     @Transactional
@@ -267,7 +273,7 @@ public class ParentMeetingService {
         if (updated != 1) throw ApiException.conflict("VERSION_CONFLICT", "Meeting attendance changed; reload before saving");
         InviteeView next = requireInviteeById(inviteeId, false);
         audit.append(meeting.schoolId(), actor, "ATTENDANCE", "MEETING_INVITEE", inviteeId,
-                Map.of("attendance", current.attendance()), Map.of("attendance", next.attendance()), null);
+                auditMap("attendance", current.attendance()), auditMap("attendance", next.attendance()), null);
         return next;
     }
 
@@ -293,7 +299,7 @@ public class ParentMeetingService {
                 "INSERT INTO communication.meeting_outcomes(id,school_id,meeting_id,student_id,body,visibility,recorded_by) VALUES (?,?,?,?,?,?,?)",
                 id, meeting.schoolId(), meetingId, studentId, safeBody, safeVisibility, actor);
         audit.append(meeting.schoolId(), actor, "CREATE_OUTCOME", "MEETING_OUTCOME", id, null,
-                Map.of("meetingId", meetingId, "studentId", studentId, "visibility", safeVisibility), null);
+                auditMap("meetingId", meetingId, "studentId", studentId, "visibility", safeVisibility), null);
 
         if (!"STAFF_ONLY".equals(safeVisibility)) {
             List<UUID> recipients = new ArrayList<>(notificationRecipientsForStudent(meetingId, studentId));
@@ -331,7 +337,7 @@ public class ParentMeetingService {
                 meeting.title() + " · " + meeting.location(), "PARENT_MEETING", meeting.id(),
                 Map.of("startsAt", meeting.startsAt(), "location", meeting.location(), "inviteeCount", inviteeIds.size()));
         audit.append(meeting.schoolId(), actor, "REMIND", "PARENT_MEETING", meeting.id(), null,
-                Map.of("inviteeCount", inviteeIds.size()), null);
+                auditMap("inviteeCount", inviteeIds.size()), null);
         return inviteeIds.size();
     }
 
@@ -371,8 +377,8 @@ public class ParentMeetingService {
         if (updated != 1) throw ApiException.conflict("VERSION_CONFLICT", "Meeting changed; reload before changing status");
         MeetingView next = requireMeeting(meeting.id());
         audit.append(meeting.schoolId(), actor, target, "PARENT_MEETING", meeting.id(),
-                Map.of("status", meeting.status(), "version", meeting.version()),
-                Map.of("status", next.status(), "version", next.version()), null);
+                auditMap("status", meeting.status(), "version", meeting.version()),
+                auditMap("status", next.status(), "version", next.version()), null);
         notifyMeetingAudience(next, eventType, eventTitle, next.title(), Map.of("status", target));
         return next;
     }
@@ -681,6 +687,15 @@ public class ParentMeetingService {
     private OffsetDateTime timestamp(ResultSet rs, String column) throws SQLException {
         Timestamp value = rs.getTimestamp(column);
         return value == null ? null : value.toInstant().atOffset(ZoneOffset.UTC);
+    }
+
+    private Map<String, Object> auditMap(Object... values) {
+        if (values.length % 2 != 0) throw new IllegalArgumentException("Audit map requires key/value pairs");
+        Map<String, Object> result = new LinkedHashMap<>();
+        for (int i = 0; i < values.length; i += 2) {
+            result.put(String.valueOf(values[i]), values[i + 1]);
+        }
+        return result;
     }
 
     private String normalize(String value, Set<String> allowed, String code) {
