@@ -4,6 +4,10 @@ import { api, login, tokens } from './api'
 type Membership = { school_id: string; school_code: string; school_name: string; role: string }
 type Me = { user: { id: string; email: string; full_name: string; platform_role: string }; memberships: Membership[] }
 type Row = Record<string, any>
+type Preference = { category: string; inAppEnabled: boolean; realtimeEnabled: boolean }
+type NotificationPage = { items: Row[]; nextCursor?: { beforeCreatedAt: string; beforeId: string } | null }
+
+const notificationCategories = ['ALL', 'ATTENDANCE', 'LEAVE', 'SCORE', 'ANNOUNCEMENT', 'COMMENT', 'MESSAGE', 'SYSTEM']
 
 function Login({ onDone }: { onDone: () => void }) {
   const [email, setEmail] = useState('admin@eclassroom.local')
@@ -29,6 +33,7 @@ export default function App() {
   const [schoolId, setSchoolId] = useState('')
   const [tab, setTab] = useState('dashboard')
   const [notifications, setNotifications] = useState<Row[]>([])
+  const [unreadCount, setUnreadCount] = useState(0)
   const [toast, setToast] = useState('')
 
   const loadMe = async () => {
@@ -40,8 +45,20 @@ export default function App() {
     } catch { tokens.clear(); setMe(null) } finally { setLoading(false) }
   }
 
+  const loadNotifications = async () => {
+    if (!me || !schoolId) return
+    try {
+      const [items, unread] = await Promise.all([
+        api<Row[]>('/api/v1/notifications?limit=30'),
+        api<{ count: number }>(`/api/v1/notifications/unread-count?schoolId=${schoolId}`)
+      ])
+      setNotifications(items.filter(item => String(item.school_id) === schoolId))
+      setUnreadCount(unread.count)
+    } catch { /* keep shell usable when notification API is unavailable */ }
+  }
+
   useEffect(() => { if (tokens.access()) void loadMe(); else setLoading(false) }, [])
-  useEffect(() => { if (me) void api<Row[]>('/api/v1/notifications?limit=30').then(setNotifications).catch(() => undefined) }, [me, schoolId])
+  useEffect(() => { if (me && schoolId) void loadNotifications() }, [me, schoolId])
   useEffect(() => {
     const token = tokens.access(); if (!token || !me) return
     const scheme = location.protocol === 'https:' ? 'wss' : 'ws'
@@ -50,11 +67,11 @@ export default function App() {
       try {
         const message = JSON.parse(event.data)
         setToast(message.data?.title || message.eventType || 'New update')
-        void api<Row[]>('/api/v1/notifications?limit=30').then(setNotifications)
+        void loadNotifications()
       } catch { /* ignore malformed pushed message */ }
     }
     return () => ws.close()
-  }, [me])
+  }, [me, schoolId])
 
   if (loading) return <div className="center">Loading…</div>
   if (!me) return <Login onDone={() => void loadMe()} />
@@ -70,7 +87,7 @@ export default function App() {
   return <div className="app-shell">
     {toast && <div className="toast" onClick={() => setToast('')}>{toast}</div>}
     <aside><div className="logo"><span>EC</span><div><b>E-Classroom</b><small>{school?.school_name || 'Select school'}</small></div></div>
-      <nav>{tabs.map(item => <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{item[0].toUpperCase() + item.slice(1)}</button>)}</nav>
+      <nav>{tabs.map(item => <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}><span>{item[0].toUpperCase() + item.slice(1)}</span>{item === 'notifications' && unreadCount > 0 && <b className="nav-badge">{unreadCount > 99 ? '99+' : unreadCount}</b>}</button>)}</nav>
       <div className="profile"><b>{me.user.full_name}</b><span>{roles.join(' · ') || me.user.platform_role}</span><button onClick={() => { tokens.clear(); setMe(null) }}>Sign out</button></div>
     </aside>
     <main><header><div><h2>{tab[0].toUpperCase() + tab.slice(1)}</h2><p>{school?.school_name}</p></div>
@@ -83,7 +100,7 @@ export default function App() {
         {tab === 'parent' && <Parent schoolId={schoolId} />}
         {tab === 'student' && <Student schoolId={schoolId} />}
         {tab === 'communication' && <Communication schoolId={schoolId} canPublish={isAdmin || isTeacher} />}
-        {tab === 'notifications' && <Notifications rows={notifications} reload={() => { void api<Row[]>('/api/v1/notifications?limit=30').then(setNotifications) }} />}
+        {tab === 'notifications' && <Notifications schoolId={schoolId} rows={notifications} reload={() => void loadNotifications()} />}
       </>}
     </main>
   </div>
@@ -158,19 +175,150 @@ function Student({ schoolId }: { schoolId: string }) {
 }
 
 function Communication({ schoolId, canPublish }: { schoolId: string; canPublish: boolean }) {
-  const [rows, setRows] = useState<Row[]>([]); const [conversations, setConversations] = useState<Row[]>([]); const [selected, setSelected] = useState(''); const [messages, setMessages] = useState<Row[]>([])
-  const load = () => { void api<Row[]>(`/api/v1/schools/${schoolId}/announcements`).then(setRows); void api<Row[]>(`/api/v1/schools/${schoolId}/conversations`).then(setConversations).catch(() => setConversations([])) }
-  useEffect(() => { load() }, [schoolId])
-  useEffect(() => { if (selected) void api<Row[]>(`/api/v1/conversations/${selected}/messages`).then(setMessages) }, [selected])
-  const publish = async () => { const title = prompt('Announcement title?'); const body = prompt('Message?'); if (title && body) { await api(`/api/v1/schools/${schoolId}/announcements`, { method: 'POST', body: JSON.stringify({ title, body, targetType: 'SCHOOL', targetId: null }) }); load() } }
-  const send = async () => { if (!selected) return; const body = prompt('Message?'); if (body) { await api(`/api/v1/conversations/${selected}/messages`, { method: 'POST', body: JSON.stringify({ body }) }); setMessages(await api<Row[]>(`/api/v1/conversations/${selected}/messages`)) } }
-  return <section>{canPublish && <div className="toolbar"><button className="primary" onClick={() => void publish()}>Publish school announcement</button></div>}<div className="cards">{rows.map(r => <article key={r.id} className="announcement"><small>{new Date(r.published_at).toLocaleString()}</small><h3>{r.title}</h3><p>{r.body}</p></article>)}</div>
-    <Card title="Conversations"><select value={selected} onChange={e => setSelected(e.target.value)}><option value="">Choose conversation</option>{conversations.map(c => <option key={c.id} value={c.id}>{c.subject || 'Conversation'}</option>)}</select>{selected && <><Table rows={messages} /><button onClick={() => void send()}>Send message</button></>}</Card></section>
+  const [announcements, setAnnouncements] = useState<Row[]>([])
+  const [conversations, setConversations] = useState<Row[]>([])
+  const [contacts, setContacts] = useState<Row[]>([])
+  const [selected, setSelected] = useState('')
+  const [messages, setMessages] = useState<Row[]>([])
+  const [announcementTitle, setAnnouncementTitle] = useState('')
+  const [announcementBody, setAnnouncementBody] = useState('')
+  const [announcementPinned, setAnnouncementPinned] = useState(false)
+  const [newContact, setNewContact] = useState('')
+  const [newSubject, setNewSubject] = useState('')
+  const [messageBody, setMessageBody] = useState('')
+  const [status, setStatus] = useState('')
+
+  const load = async () => {
+    const [noticeRows, conversationRows, contactRows] = await Promise.all([
+      api<Row[]>(`/api/v1/schools/${schoolId}/announcements`),
+      api<Row[]>(`/api/v1/schools/${schoolId}/conversations`).catch(() => [] as Row[]),
+      api<Row[]>(`/api/v1/schools/${schoolId}/communication/contacts`).catch(() => [] as Row[])
+    ])
+    setAnnouncements(noticeRows)
+    setConversations(conversationRows)
+    setContacts(contactRows)
+    if (!newContact && contactRows[0]) setNewContact(String(contactRows[0].user_id))
+  }
+
+  useEffect(() => { void load() }, [schoolId])
+  useEffect(() => {
+    if (!selected) { setMessages([]); return }
+    void api<Row[]>(`/api/v1/conversations/${selected}/messages`).then(rows => {
+      setMessages(rows)
+      void load()
+    })
+  }, [selected])
+
+  const publish = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!announcementTitle.trim() || !announcementBody.trim()) return
+    try {
+      await api(`/api/v1/schools/${schoolId}/announcements`, { method: 'POST', body: JSON.stringify({ title: announcementTitle, body: announcementBody, targetType: 'SCHOOL', targetId: null, pinned: announcementPinned }) })
+      setAnnouncementTitle(''); setAnnouncementBody(''); setAnnouncementPinned(false); setStatus('Announcement published'); await load()
+    } catch (err) { setStatus((err as Error).message) }
+  }
+
+  const startConversation = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!newContact) return
+    try {
+      const result = await api<{ id: string }>(`/api/v1/schools/${schoolId}/conversations`, { method: 'POST', body: JSON.stringify({ subject: newSubject || null, participantIds: [newContact] }) })
+      setNewSubject(''); setSelected(result.id); setStatus('Conversation created'); await load()
+    } catch (err) { setStatus((err as Error).message) }
+  }
+
+  const send = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!selected || !messageBody.trim()) return
+    try {
+      await api(`/api/v1/conversations/${selected}/messages`, { method: 'POST', body: JSON.stringify({ body: messageBody }) })
+      setMessageBody('')
+      setMessages(await api<Row[]>(`/api/v1/conversations/${selected}/messages`))
+      await load()
+    } catch (err) { setStatus((err as Error).message) }
+  }
+
+  return <section>
+    {status && <p className="status-line">{status}</p>}
+    {canPublish && <Card title="Publish announcement"><form className="inline-form" onSubmit={publish}>
+      <label>Title<input value={announcementTitle} onChange={e => setAnnouncementTitle(e.target.value)} maxLength={255} placeholder="School announcement title" /></label>
+      <label>Message<textarea value={announcementBody} onChange={e => setAnnouncementBody(e.target.value)} rows={4} placeholder="Write the announcement…" /></label>
+      <label className="check-row"><input type="checkbox" checked={announcementPinned} onChange={e => setAnnouncementPinned(e.target.checked)} /> Pin this announcement</label>
+      <div><button className="primary" type="submit">Publish announcement</button></div>
+    </form></Card>}
+
+    <div className="section-head"><div><h3>Announcements</h3><p>Durable school and class updates.</p></div><span>{announcements.length} visible</span></div>
+    <div className="cards">{announcements.length ? announcements.map(row => <article key={row.id} className="announcement">
+      <small>{row.pinned ? 'Pinned · ' : ''}{new Date(row.published_at).toLocaleString()}</small><h3>{row.title}</h3><p>{row.body}</p>
+    </article>) : <Empty text="No announcements yet" />}</div>
+
+    <Card title="Start a conversation"><form className="new-conversation-form" onSubmit={startConversation}>
+      <label>Contact<select value={newContact} onChange={e => setNewContact(e.target.value)}><option value="">Choose an allowed contact</option>{contacts.map(contact => <option key={contact.user_id} value={contact.user_id}>{contact.full_name} · {contact.roles || contact.email}</option>)}</select></label>
+      <label>Subject<input value={newSubject} onChange={e => setNewSubject(e.target.value)} maxLength={255} placeholder="Optional subject" /></label>
+      <button className="primary" type="submit" disabled={!newContact}>Start conversation</button>
+    </form><p className="hint">Only people allowed by your school relationship are shown here.</p></Card>
+
+    <Card title="Messages"><div className="communication-grid">
+      <div className="conversation-list">{conversations.length ? conversations.map(conversation => <button key={conversation.id} className={selected === String(conversation.id) ? 'conversation active' : 'conversation'} onClick={() => setSelected(String(conversation.id))}>
+        <span><b>{conversation.subject || 'Conversation'}</b><small>{conversation.last_message || 'No messages yet'}</small></span>
+        {Number(conversation.unread_count || 0) > 0 && <em>{conversation.unread_count}</em>}
+      </button>) : <Empty text="No conversations yet" />}</div>
+      <div className="message-pane">{selected ? <>
+        <div className="message-list">{messages.length ? messages.map(message => <div className="message" key={message.id}><small>{message.sender_name} · {new Date(message.created_at).toLocaleString()}</small><p>{message.body}</p></div>) : <Empty text="No messages yet" />}</div>
+        <form className="message-compose" onSubmit={send}><textarea value={messageBody} onChange={e => setMessageBody(e.target.value)} rows={3} placeholder="Write a message…" /><button className="primary" type="submit">Send</button></form>
+      </> : <Empty text="Choose a conversation" />}</div>
+    </div></Card>
+  </section>
 }
 
-function Notifications({ rows, reload }: { rows: Row[]; reload: () => void }) {
-  const read = async (id: string) => { await api(`/api/v1/notifications/${id}/read`, { method: 'POST' }); reload() }
-  return <section><div className="cards">{rows.map(r => <article key={r.id} className={`notification ${r.read_at ? '' : 'unread'}`} onClick={() => void read(String(r.id))}><small>{r.type} · {new Date(r.created_at).toLocaleString()}</small><h3>{r.title}</h3><p>{r.body}</p></article>)}</div></section>
+function Notifications({ schoolId, rows, reload }: { schoolId: string; rows: Row[]; reload: () => void }) {
+  const [category, setCategory] = useState('ALL')
+  const [unreadOnly, setUnreadOnly] = useState(false)
+  const [items, setItems] = useState<Row[]>(rows)
+  const [preferences, setPreferences] = useState<Preference[]>([])
+  const [unread, setUnread] = useState(0)
+  const [message, setMessage] = useState('')
+
+  const load = async () => {
+    const params = new URLSearchParams({ schoolId, limit: '50', unreadOnly: String(unreadOnly) })
+    if (category !== 'ALL') params.set('category', category)
+    const [page, prefs, count] = await Promise.all([
+      api<NotificationPage>(`/api/v1/notifications/page?${params}`),
+      api<Preference[]>(`/api/v1/notifications/preferences?schoolId=${schoolId}`),
+      api<{ count: number }>(`/api/v1/notifications/unread-count?schoolId=${schoolId}`)
+    ])
+    setItems(page.items); setPreferences(prefs); setUnread(count.count)
+  }
+
+  useEffect(() => { void load().catch(err => setMessage((err as Error).message)) }, [schoolId, category, unreadOnly])
+  useEffect(() => { setItems(rows) }, [rows])
+
+  const read = async (id: string) => { await api(`/api/v1/notifications/${id}/read`, { method: 'POST' }); await load(); reload() }
+  const readAll = async () => { await api(`/api/v1/notifications/read-all?schoolId=${schoolId}`, { method: 'POST' }); await load(); reload() }
+  const changePreference = async (preference: Preference, field: 'inAppEnabled' | 'realtimeEnabled', value: boolean) => {
+    const next = { ...preference, [field]: value }
+    try {
+      await api(`/api/v1/notifications/preferences/${preference.category}?schoolId=${schoolId}`, { method: 'PUT', body: JSON.stringify({ inAppEnabled: next.inAppEnabled, realtimeEnabled: next.realtimeEnabled }) })
+      setPreferences(current => current.map(item => item.category === next.category ? next : item))
+      setMessage('Notification preference saved')
+    } catch (err) { setMessage((err as Error).message) }
+  }
+
+  return <section>
+    <div className="section-head"><div><h3>Internal notifications</h3><p>Durable in-app messages with optional realtime delivery.</p></div><span>{unread} unread</span></div>
+    <div className="toolbar"><select value={category} onChange={e => setCategory(e.target.value)}>{notificationCategories.map(item => <option key={item}>{item}</option>)}</select>
+      <label className="check-row"><input type="checkbox" checked={unreadOnly} onChange={e => setUnreadOnly(e.target.checked)} /> Unread only</label>
+      <button onClick={() => void readAll()} disabled={!unread}>Mark all read</button></div>
+    {message && <p className="status-line">{message}</p>}
+    <div className="notification-layout"><div className="cards">{items.length ? items.map(row => <article key={row.id} className={`notification ${row.read_at ? '' : 'unread'}`} onClick={() => void read(String(row.id))}>
+      <small>{row.category || row.type} · {new Date(row.created_at).toLocaleString()}</small><h3>{row.title}</h3><p>{row.body}</p>
+    </article>) : <Empty text="No notifications match this filter" />}</div>
+      <Card title="Delivery preferences"><div className="preference-list">{preferences.map(preference => <div className="preference-row" key={preference.category}><b>{preference.category}</b>
+        <label><input type="checkbox" checked={preference.inAppEnabled} onChange={e => void changePreference(preference, 'inAppEnabled', e.target.checked)} /> In-app</label>
+        <label><input type="checkbox" checked={preference.realtimeEnabled} onChange={e => void changePreference(preference, 'realtimeEnabled', e.target.checked)} /> Realtime</label>
+      </div>)}</div><p className="hint">SMS Brandname, Zalo OA, email and push can be added later as delivery adapters without changing these preferences.</p></Card>
+    </div>
+  </section>
 }
 
 function Stat({ label, value }: { label: string; value: any }) { return <div className="stat"><span>{label}</span><strong>{String(value ?? 0)}</strong></div> }
