@@ -278,6 +278,61 @@ GET /conversations/{id}/messages/page?limit=50&beforeCreatedAt=<timestamp>&befor
 
 Muted participants retain durable message history but do not receive new-message notification fan-out until unmuted.
 
+## Parent meetings
+
+```text
+POST /schools/{schoolId}/meetings
+GET  /schools/{schoolId}/meetings
+GET  /meetings/{meetingId}
+
+PUT    /meetings/{meetingId}/response
+PUT    /meetings/{meetingId}/slots/{slotId}/booking
+DELETE /meetings/{meetingId}/slots/{slotId}/booking?studentId=<uuid>&version=<n>
+
+PUT  /meetings/{meetingId}/invitees/{inviteeId}/attendance
+POST /meetings/{meetingId}/outcomes
+POST /meetings/{meetingId}/reminders
+POST /meetings/{meetingId}/cancel
+POST /meetings/{meetingId}/complete
+```
+
+Meeting scopes are `SCHOOL`, `CLASSROOM`, and `STUDENT`. The client selects scope only; guardian invitees are derived by the backend from active guardian relationships. The target student audience is snapshotted when the meeting is created so later enrollment changes do not rewrite meeting history.
+
+Create example:
+
+```json
+{
+  "scopeType": "CLASSROOM",
+  "scopeId": "classroom-uuid",
+  "title": "Họp phụ huynh giữa học kỳ",
+  "agenda": "Tình hình học tập và kế hoạch giai đoạn tiếp theo",
+  "note": "Mang theo bài kiểm tra gần nhất",
+  "location": "Phòng 101",
+  "startsAt": "2026-09-20T08:00:00+07:00",
+  "endsAt": "2026-09-20T10:00:00+07:00",
+  "includeStudents": false,
+  "slots": [
+    {"startsAt":"2026-09-20T08:00:00+07:00","endsAt":"2026-09-20T08:15:00+07:00"}
+  ]
+}
+```
+
+Rules:
+
+- school-wide meetings require a school admin
+- classroom/student meetings require admin or the relevant teacher resource authority
+- optional appointment slots must be non-overlapping, inside meeting bounds, and are limited to 100 per meeting
+- parent RSVP is per child and versioned with `PENDING`, `ACCEPTED`, `DECLINED`
+- accepting is required before a one-to-one slot can be booked
+- slot booking is atomic and a guardian/student may hold at most one slot per meeting
+- attendance is staff-managed after the meeting starts
+- outcomes use `STAFF_ONLY`, `GUARDIAN`, or `STUDENT_AND_GUARDIAN` visibility
+- student-visible outcomes require the meeting to have `includeStudents=true`
+- reminders skip declined invitees and are throttled per invitee for one hour
+- lifecycle is `SCHEDULED -> CANCELLED|COMPLETED`; completion is allowed only after the meeting end time
+
+See `docs/10-parent-meetings.md` for the full workflow and authorization model.
+
 ## Internal notifications / in-app SMS
 
 The V1 "SMS" channel is the internal durable notification center plus optional realtime WebSocket delivery. External SMS Brandname, Zalo OA, email and mobile push are intentionally deferred delivery adapters.
@@ -309,6 +364,7 @@ SCORE
 ANNOUNCEMENT
 COMMENT
 MESSAGE
+MEETING
 SYSTEM
 ```
 
@@ -353,6 +409,8 @@ eclassroom.assessment.locked.v1
 eclassroom.announcement.published.v1
 eclassroom.teacher-comment.created.v1
 eclassroom.message.created.v1
+eclassroom.meeting.invited.v1
+eclassroom.meeting.reminder.v1
 ```
 
 ## Reporting
@@ -371,7 +429,7 @@ The current risk engine is explicit and explainable. It uses absence ratio and s
 GET /schools/{schoolId}/audit/{entityType}/{entityId}
 ```
 
-Sensitive attendance and score mutations are captured by append-only database audit triggers. Workflow-level audit entries such as leave submit/approve/reject and assessment create/submit/lock are appended by the transactional service and include the current correlation ID. Score revisions also preserve actor, reason and correlation ID.
+Sensitive attendance and score mutations are captured by append-only database audit triggers. Workflow-level audit entries such as leave submit/approve/reject, assessment create/submit/lock, conduct correction and parent-meeting state/action changes are appended by transactional services and include the current correlation ID. Score/conduct revisions also preserve actor, reason and correlation ID.
 
 ## Core role matrix
 
@@ -387,7 +445,11 @@ Sensitive attendance and score mutations are captured by append-only database au
 | View student records | Yes | Assigned students | Linked child | Self |
 | Publish school announcement | Yes | No | No | No |
 | Publish class announcement | Yes | Assigned class | No | No |
-| Create teacher comment | Yes | Assigned students | No | No |
+| Create teacher comment / conduct | Yes | Assigned students | No | No |
+| Create parent meeting | Yes | Assigned class/student | No | No |
+| Respond / book meeting slot | Operational view | Operational view | Invited child | No |
+| Record meeting attendance/outcome | Yes | Managed meeting | No | No |
+| View student-targeted meeting | Yes | Authorized scope | Invited child | If explicitly included |
 | Start conversation | Yes | Related members | Related teachers/admin | Related teachers/admin |
 | Receive internal notifications | Yes | Yes | Yes | Yes |
 
@@ -397,7 +459,7 @@ Sensitive attendance and score mutations are captured by append-only database au
 {
   "timestamp": "2026-09-13T00:00:00Z",
   "code": "VERSION_CONFLICT",
-  "message": "Assessment changed; reload before changing workflow state",
+  "message": "Resource changed; reload before changing workflow state",
   "correlationId": "uuid",
   "details": {}
 }
