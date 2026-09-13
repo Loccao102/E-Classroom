@@ -30,7 +30,7 @@ Nginx Web Gateway
 
 ### Why Java + Go?
 
-- **Java / Spring Boot**: authentication, tenant isolation, resource authorization, academic workflows, transactions, attendance, grading, leave requests, communication, reports, audit and transactional outbox.
+- **Java / Spring Boot**: authentication, tenant isolation, resource authorization, academic workflows, transactions, attendance, grading, leave requests, communication, meetings, reports, audit and transactional outbox.
 - **Go / Gin**: authenticated WebSockets, connection backpressure, Redis presence, NATS event fan-out and graceful horizontal scaling.
 - **PostgreSQL**: durable source of truth, including notifications and audit history.
 - **Redis**: ephemeral presence and future distributed rate-limit/cache state; never the academic source of truth.
@@ -49,6 +49,7 @@ The Java backend starts as a **modular monolith** rather than prematurely splitt
 - Platform administrator bootstrap.
 - Resource-level authorization for class/subject teaching assignments, guardianship, homeroom workflows and student self-access.
 - Tenant-aware access using `school_id`.
+- Session listing/revocation, logout-all, password changes, temporary-password enforcement and login throttling.
 
 ### Academic structure
 
@@ -79,31 +80,43 @@ The Java backend starts as a **modular monolith** rather than prematurely splitt
 - Guardian notifications when results are submitted.
 - Weighted student reporting.
 
-### Communication
+### Student timeline and conduct
+
+- Unified role-aware timeline across attendance, leave decisions, published scores, teacher comments, conduct and announcements.
+- Deterministic keyset pagination and school-timezone date filters.
+- Dedicated conduct categories, severity and explicit staff/guardian/student visibility.
+- Optimistic conduct corrections with append-only before/after revisions and correlated audit entries.
+- Relationship-scoped authorization that prevents multi-role privilege escalation.
+
+### Communication and parent meetings
 
 - School/class announcements.
 - Teacher comments.
 - Parent/teacher conversations and messages.
-- Durable notification center with read state.
+- Durable notification center with independent in-app and realtime preferences.
 - Realtime WebSocket delivery from NATS events.
+- Parent meetings scoped to school, classroom or student with server-derived guardian invitees.
+- RSVP, optional one-to-one appointment slots, attendance, reminders and follow-up outcomes.
+- Meeting audience snapshots so historical visibility is not rewritten by later enrollment changes.
+- Parent-meeting notifications use the internal `MEETING` notification category; external SMS/Zalo/calendar/video integrations remain optional future adapters.
 
 ### Reporting and audit
 
-- School KPI dashboard.
-- Student attendance and score summary.
+- School/teacher KPI dashboards and time-range trends.
+- Student attendance and weighted score summary.
 - Explainable rule-based academic-risk indicators.
-- Append-only sensitive audit history for attendance and scores.
+- Append-only sensitive audit history for attendance, scores, workflow transitions, conduct corrections and parent-meeting actions.
 - Correlation IDs and stable API error envelopes.
 
 ## Web workspaces
 
 The SPA adapts to the authenticated role:
 
-- **Admin:** dashboard and academic-resource management.
-- **Teacher:** assigned classes, attendance, assessment/score entry and leave-review workflow.
-- **Parent:** children, attendance, scores, risk summary, leave requests and notifications.
-- **Student:** personal academic report.
-- **All roles:** announcements, conversations where authorized and notification center.
+- **Admin:** dashboard, academic-resource management, student records, meeting management and account/security operations.
+- **Teacher:** assigned classes, attendance, assessment/score entry, leave-review, student timeline/conduct and authorized parent meetings.
+- **Parent:** child reports/timeline, leave requests, meeting invitations/RSVP/slot booking and notifications.
+- **Student:** personal academic report/timeline and explicitly shared meeting information.
+- **All roles:** announcements, authorized conversations, meeting workspace, notification center and security/session controls.
 
 ## Repository layout
 
@@ -119,7 +132,9 @@ The SPA adapts to the authenticated role:
 │   ├── 05-scalability-and-reliability.md
 │   ├── 06-roadmap.md
 │   ├── 07-security-and-operations.md
-│   └── 08-api-reference.md
+│   ├── 08-api-reference.md
+│   ├── 09-student-timeline-and-conduct.md
+│   └── 10-parent-meetings.md
 ├── services/
 │   ├── core-api/                    # Java / Spring Boot
 │   └── realtime-gateway/            # Go / Gin
@@ -172,7 +187,7 @@ Go:   mod verify + tidy check + gofmt + tests + build
 Web:  TypeScript typecheck + Vite production build
 ```
 
-The final job builds the complete Docker Compose stack, waits for Nginx, authenticates through the same `/api` path used by the browser, reads `/me`, and checks Java and Go readiness probes.
+The final job builds the complete Docker Compose stack, waits for Nginx, authenticates through the same `/api` path used by the browser, reads `/me`, and checks Java and Go readiness probes. It also exercises the PostgreSQL outbox → JetStream → Go consumer path.
 
 ## Documentation
 
@@ -184,6 +199,8 @@ The final job builds the complete Docker Compose stack, waits for Nginx, authent
 - Roadmap: [`docs/06-roadmap.md`](docs/06-roadmap.md)
 - Security/operations: [`docs/07-security-and-operations.md`](docs/07-security-and-operations.md)
 - API reference: [`docs/08-api-reference.md`](docs/08-api-reference.md)
+- Student timeline/conduct: [`docs/09-student-timeline-and-conduct.md`](docs/09-student-timeline-and-conduct.md)
+- Parent meetings: [`docs/10-parent-meetings.md`](docs/10-parent-meetings.md)
 
 ## Engineering principles
 
