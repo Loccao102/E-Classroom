@@ -57,17 +57,19 @@ public class GradingController {
     @PostMapping("/assessments/{id}/submit")
     public Map<String, Long> submit(
             @PathVariable UUID id,
-            @RequestBody TransitionRequest request,
+            @RequestBody(required = false) TransitionRequest request,
             Authentication authentication) {
-        return Map.of("version", service.submit(id, request.version(), CurrentUser.id(authentication)));
+        Long expectedVersion = request == null ? null : request.version();
+        return Map.of("version", service.submit(id, expectedVersion, CurrentUser.id(authentication)));
     }
 
     @PostMapping("/assessments/{id}/lock")
     public Map<String, Long> lock(
             @PathVariable UUID id,
-            @RequestBody TransitionRequest request,
+            @RequestBody(required = false) TransitionRequest request,
             Authentication authentication) {
-        return Map.of("version", service.lock(id, request.version(), CurrentUser.id(authentication)));
+        Long expectedVersion = request == null ? null : request.version();
+        return Map.of("version", service.lock(id, expectedVersion, CurrentUser.id(authentication)));
     }
 
     @GetMapping("/schools/{schoolId}/students/{studentId}/scores")
