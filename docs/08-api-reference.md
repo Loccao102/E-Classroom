@@ -143,12 +143,71 @@ Submission creates a durable reviewer notification when reviewers exist and alwa
 POST /schools/{schoolId}/assessments
 GET  /schools/{schoolId}/teaching-assignments/{assignmentId}/assessments
 PUT  /assessments/{assessmentId}/scores
+GET  /assessments/{assessmentId}/scores
 POST /assessments/{assessmentId}/submit
 POST /assessments/{assessmentId}/lock
+GET  /assessments/{assessmentId}/revisions
 GET  /schools/{schoolId}/students/{studentId}/scores
 ```
 
-Submitting an assessment makes score notifications visible to linked guardians. Locking is an administrator action.
+Assessment lifecycle:
+
+```text
+DRAFT -> SUBMITTED -> LOCKED
+```
+
+Rules:
+
+- only the assigned teacher or school admin may create/manage the assessment
+- title/category are required, `maxScore > 0`, `weight > 0`
+- when a semester is supplied, it must belong to the same school and match the teaching assignment
+- an assessment date must fall inside the supplied semester
+- score mutation is allowed only while the assessment is `DRAFT`
+- score batches are validated completely before mutation and may contain at most 1000 unique students
+- every scored student must have an active enrollment in the assignment classroom
+- numeric no-op updates do not increment score versions or create revision rows
+- `submit` is idempotent: a retry after successful submission does not publish duplicate notifications/events
+- only a `SUBMITTED` assessment may be locked, and only by a school admin
+- student/guardian score views expose only `SUBMITTED` or `LOCKED` scores
+
+Transition clients should send the assessment version:
+
+```json
+{
+  "version": 0
+}
+```
+
+The version is used for optimistic concurrency and returns `VERSION_CONFLICT` if the workflow state changed first. For backward compatibility, transition requests without a body are still accepted; the server performs an atomic status/version transition using the current row version.
+
+Bulk score save example:
+
+```json
+{
+  "reason": "Teacher entry",
+  "scores": [
+    {"studentId":"uuid-a","score":8.5},
+    {"studentId":"uuid-b","score":7.0}
+  ]
+}
+```
+
+Staff may reload draft/published values with:
+
+```text
+GET /assessments/{assessmentId}/scores
+```
+
+Revision history uses deterministic keyset pagination:
+
+```text
+GET /assessments/{assessmentId}/revisions?limit=50
+GET /assessments/{assessmentId}/revisions?limit=50&beforeCreatedAt=2026-09-13T10:00:00+07:00&beforeId=<uuid>
+```
+
+Both cursor fields must be supplied together. The response contains `items` and `nextCursor` (`beforeCreatedAt`, `beforeId`). Revision rows include previous/new scores, actor, reason, correlation ID and timestamp.
+
+Submission writes one `assessment.submitted.v1` domain event and one `student.score.published.v1` event per scored student. Guardian durable notifications and realtime delivery are generated only on the first successful submit. Locking writes `assessment.locked.v1`.
 
 ## Communication
 
@@ -198,7 +257,9 @@ Examples:
 eclassroom.student.attendance.changed.v1
 eclassroom.student.leave-request.submitted.v1
 eclassroom.student.leave-request.reviewed.v1
-eclassroom.student.score.changed.v1
+eclassroom.assessment.submitted.v1
+eclassroom.student.score.published.v1
+eclassroom.assessment.locked.v1
 eclassroom.announcement.published.v1
 ```
 
@@ -210,7 +271,7 @@ GET /schools/{schoolId}/reports/students/{studentId}
 GET /schools/{schoolId}/reports/risks
 ```
 
-The current risk engine is explicit and explainable. It uses absence ratio and submitted/locked score averages; it is not an opaque ML classifier.
+The current risk engine is explicit and explainable. It uses absence ratio and submitted/locked score averages; student subject averages already apply configurable assessment weights. It is not an opaque ML classifier.
 
 ## Audit
 
@@ -218,7 +279,7 @@ The current risk engine is explicit and explainable. It uses absence ratio and s
 GET /schools/{schoolId}/audit/{entityType}/{entityId}
 ```
 
-Sensitive attendance and score mutations are captured by append-only database audit triggers. Workflow-level audit entries such as leave submit/approve/reject are appended by the transactional service and include the current correlation ID.
+Sensitive attendance and score mutations are captured by append-only database audit triggers. Workflow-level audit entries such as leave submit/approve/reject and assessment create/submit/lock are appended by the transactional service and include the current correlation ID. Score revisions also preserve actor, reason and correlation ID.
 
 ## Core role matrix
 
@@ -242,7 +303,7 @@ Sensitive attendance and score mutations are captured by append-only database au
 {
   "timestamp": "2026-09-13T00:00:00Z",
   "code": "VERSION_CONFLICT",
-  "message": "Attendance session changed; reload before saving",
+  "message": "Assessment changed; reload before changing workflow state",
   "correlationId": "uuid",
   "details": {}
 }
