@@ -257,9 +257,7 @@ public class ParentMeetingService {
                                         long expectedVersion, UUID actor) {
         MeetingView meeting = requireMeeting(meetingId);
         requireManage(meeting, actor);
-        if (OffsetDateTime.now(ZoneOffset.UTC).isBefore(meeting.startsAt())) {
-            throw ApiException.badRequest("MEETING_NOT_STARTED", "Attendance can only be recorded after the meeting starts");
-        }
+        requireStartedAndNotCancelled(meeting, "Attendance can only be recorded after the meeting starts");
         String normalized = normalize(attendance, ATTENDANCE, "INVALID_MEETING_ATTENDANCE");
         InviteeView current = requireInviteeById(inviteeId, true);
         if (!meetingId.equals(current.meetingId())) throw ApiException.notFound("Meeting invitee was not found");
@@ -281,6 +279,7 @@ public class ParentMeetingService {
     public UUID addOutcome(UUID meetingId, UUID studentId, String body, String visibility, UUID actor) {
         MeetingView meeting = requireMeeting(meetingId);
         requireManage(meeting, actor);
+        requireStartedAndNotCancelled(meeting, "Outcomes can only be recorded after the meeting starts");
         String safeBody = requireText(body, 10000, "INVALID_MEETING_OUTCOME", "Outcome note is required");
         String safeVisibility = normalize(visibility, OUTCOME_VISIBILITY, "INVALID_MEETING_OUTCOME_VISIBILITY");
         if (!"STAFF_ONLY".equals(safeVisibility)) {
@@ -586,6 +585,15 @@ public class ParentMeetingService {
     private void ensureScheduled(MeetingView meeting) {
         if (!"SCHEDULED".equals(meeting.status())) {
             throw ApiException.conflict("INVALID_MEETING_STATE", "Meeting is no longer scheduled");
+        }
+    }
+
+    private void requireStartedAndNotCancelled(MeetingView meeting, String notStartedMessage) {
+        if ("CANCELLED".equals(meeting.status())) {
+            throw ApiException.conflict("INVALID_MEETING_STATE", "Cancelled meetings cannot be updated");
+        }
+        if (OffsetDateTime.now(ZoneOffset.UTC).isBefore(meeting.startsAt())) {
+            throw ApiException.badRequest("MEETING_NOT_STARTED", notStartedMessage);
         }
     }
 
