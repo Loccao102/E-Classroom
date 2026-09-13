@@ -10,7 +10,8 @@ import (
 func TestVerifyHS256(t *testing.T) {
 	secret := "01234567890123456789012345678901"
 	claims := Claims{
-		Email: "a@example.com",
+		Email:     "a@example.com",
+		SessionID: "session-1",
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    "eclassroom",
 			Subject:   "user-1",
@@ -33,7 +34,7 @@ func TestVerifyHS256(t *testing.T) {
 
 func TestRejectWrongIssuer(t *testing.T) {
 	secret := "01234567890123456789012345678901"
-	claims := Claims{RegisteredClaims: jwt.RegisteredClaims{
+	claims := Claims{SessionID: "session-1", RegisteredClaims: jwt.RegisteredClaims{
 		Issuer:    "wrong",
 		Subject:   "u",
 		ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Minute)),
@@ -42,5 +43,37 @@ func TestRejectWrongIssuer(t *testing.T) {
 	raw, _ := token.SignedString([]byte(secret))
 	if _, err := Verify(raw, secret, "eclassroom"); err == nil {
 		t.Fatal("expected validation error")
+	}
+}
+
+func TestRejectTemporaryPasswordToken(t *testing.T) {
+	secret := "01234567890123456789012345678901"
+	claims := Claims{
+		SessionID:          "session-1",
+		MustChangePassword: true,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    "eclassroom",
+			Subject:   "u",
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Minute)),
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	raw, _ := token.SignedString([]byte(secret))
+	if _, err := Verify(raw, secret, "eclassroom"); err == nil {
+		t.Fatal("expected temporary-password token rejection")
+	}
+}
+
+func TestRejectLegacyTokenWithoutSession(t *testing.T) {
+	secret := "01234567890123456789012345678901"
+	claims := Claims{RegisteredClaims: jwt.RegisteredClaims{
+		Issuer:    "eclassroom",
+		Subject:   "u",
+		ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Minute)),
+	}}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	raw, _ := token.SignedString([]byte(secret))
+	if _, err := Verify(raw, secret, "eclassroom"); err == nil {
+		t.Fatal("expected missing session claim rejection")
 	}
 }
