@@ -73,6 +73,9 @@ CREATE TABLE communication.meeting_slots (
 
 CREATE INDEX idx_meeting_slots_meeting_time
     ON communication.meeting_slots(meeting_id, starts_at, id);
+CREATE UNIQUE INDEX uq_meeting_slot_guardian_student
+    ON communication.meeting_slots(meeting_id, booked_by_guardian_user_id, booked_for_student_id)
+    WHERE booked_by_guardian_user_id IS NOT NULL;
 
 CREATE TABLE communication.meeting_outcomes (
     id UUID PRIMARY KEY,
