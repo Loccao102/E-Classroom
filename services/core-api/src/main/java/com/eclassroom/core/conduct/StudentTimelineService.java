@@ -98,9 +98,13 @@ public class StudentTimelineService {
                        a.target_type,NULL::varchar,0,CASE WHEN a.pinned THEN 'PINNED' ELSE a.target_type END
                 FROM communication.announcements a
                 JOIN identity.users publisher ON publisher.id=a.published_by
+                JOIN school.schools sch ON sch.id=a.school_id
                 LEFT JOIN academic.classrooms cl ON cl.id=a.target_id AND a.target_type='CLASSROOM'
                 WHERE a.school_id=? AND (a.target_type='SCHOOL' OR (a.target_type='CLASSROOM' AND EXISTS (
-                    SELECT 1 FROM academic.class_enrollments e WHERE e.school_id=? AND e.student_id=? AND e.classroom_id=a.target_id
+                    SELECT 1 FROM academic.class_enrollments e
+                    WHERE e.school_id=? AND e.student_id=? AND e.classroom_id=a.target_id
+                      AND e.start_date <= (a.published_at AT TIME ZONE sch.timezone)::date
+                      AND (e.end_date IS NULL OR e.end_date >= (a.published_at AT TIME ZONE sch.timezone)::date)
                 )))
                 """;
 
