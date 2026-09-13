@@ -66,7 +66,7 @@ public class AuthService {
         this.lockMinutes = Math.max(1, lockMinutes);
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = ApiException.class)
     public TokenResponse login(String email, String password, ClientContext client) {
         String normalizedEmail = normalizeEmail(email);
         String identifierHash = sha256(normalizedEmail);
@@ -107,7 +107,7 @@ public class AuthService {
         return response;
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = ApiException.class)
     public TokenResponse refresh(String rawToken, ClientContext client) {
         String hash = sha256(rawToken);
         List<RefreshRow> rows = jdbc.query(
@@ -133,9 +133,7 @@ public class AuthService {
                                 rs.getLong("token_version"))),
                 hash);
 
-        if (rows.isEmpty()) {
-            throw invalidRefresh();
-        }
+        if (rows.isEmpty()) throw invalidRefresh();
 
         RefreshRow row = rows.getFirst();
         Instant now = Instant.now();
@@ -215,8 +213,7 @@ public class AuthService {
     @Transactional
     public int revokeSession(UUID userId, UUID sessionId, String reason) {
         int updated = jdbc.update(
-                "UPDATE identity.refresh_tokens SET revoked_at=NOW(),revoked_reason=? " +
-                        "WHERE user_id=? AND session_id=? AND revoked_at IS NULL",
+                "UPDATE identity.refresh_tokens SET revoked_at=NOW(),revoked_reason=? WHERE user_id=? AND session_id=? AND revoked_at IS NULL",
                 reason, userId, sessionId);
         if (updated > 0) events.record(userId, null, "SESSION_REVOKE", "SUCCESS", sessionId, Map.of("reason", reason));
         return updated;
@@ -265,8 +262,7 @@ public class AuthService {
         Instant now = Instant.now();
         Instant exp = now.plus(accessMinutes, ChronoUnit.MINUTES);
         List<Map<String, Object>> rawMemberships = jdbc.queryForList(
-                "SELECT school_id,role FROM identity.school_memberships WHERE user_id=? AND status='ACTIVE'",
-                user.id());
+                "SELECT school_id,role FROM identity.school_memberships WHERE user_id=? AND status='ACTIVE'", user.id());
         List<Map<String, String>> memberships = rawMemberships.stream().map(row -> {
             Map<String, String> claim = new LinkedHashMap<>();
             claim.put("schoolId", String.valueOf(row.get("school_id")));
@@ -275,10 +271,7 @@ public class AuthService {
         }).toList();
 
         JwtClaimsSet claims = JwtClaimsSet.builder()
-                .issuer(issuer)
-                .issuedAt(now)
-                .expiresAt(exp)
-                .subject(user.id().toString())
+                .issuer(issuer).issuedAt(now).expiresAt(exp).subject(user.id().toString())
                 .claim("email", user.email())
                 .claim("name", user.fullName())
                 .claim("platformRole", user.platformRole() == null ? "" : user.platformRole())
@@ -295,8 +288,7 @@ public class AuthService {
         String refresh = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
         OffsetDateTime refreshExpiresAt = OffsetDateTime.ofInstant(now.plus(refreshDays, ChronoUnit.DAYS), ZoneOffset.UTC);
         jdbc.update(
-                "INSERT INTO identity.refresh_tokens(id,user_id,token_hash,expires_at,session_id,last_seen_at,user_agent,ip_hash) " +
-                        "VALUES (?,?,?,?,?,NOW(),?,?)",
+                "INSERT INTO identity.refresh_tokens(id,user_id,token_hash,expires_at,session_id,last_seen_at,user_agent,ip_hash) VALUES (?,?,?,?,?,NOW(),?,?)",
                 UUID.randomUUID(), user.id(), sha256(refresh), refreshExpiresAt, sessionId,
                 truncate(client.userAgent(), 255), client.ipHash());
         return new TokenResponse(access, refresh, exp, "Bearer", user.mustChangePassword());
@@ -305,11 +297,8 @@ public class AuthService {
     private boolean isLoginBlocked(String identifierHash) {
         List<AttemptRow> rows = jdbc.query(
                 "SELECT failed_count,window_started_at,locked_until FROM identity.login_attempts WHERE identifier_hash=? FOR UPDATE",
-                (rs, i) -> new AttemptRow(
-                        rs.getInt("failed_count"),
-                        rs.getTimestamp("window_started_at").toInstant(),
-                        rs.getTimestamp("locked_until") == null ? null : rs.getTimestamp("locked_until").toInstant()),
-                identifierHash);
+                (rs, i) -> new AttemptRow(rs.getInt("failed_count"), rs.getTimestamp("window_started_at").toInstant(),
+                        rs.getTimestamp("locked_until") == null ? null : rs.getTimestamp("locked_until").toInstant()), identifierHash);
         if (rows.isEmpty()) return false;
         Instant lockedUntil = rows.getFirst().lockedUntil();
         return lockedUntil != null && lockedUntil.isAfter(Instant.now());
@@ -319,10 +308,8 @@ public class AuthService {
         Instant now = Instant.now();
         List<AttemptRow> rows = jdbc.query(
                 "SELECT failed_count,window_started_at,locked_until FROM identity.login_attempts WHERE identifier_hash=? FOR UPDATE",
-                (rs, i) -> new AttemptRow(
-                        rs.getInt("failed_count"), rs.getTimestamp("window_started_at").toInstant(),
-                        rs.getTimestamp("locked_until") == null ? null : rs.getTimestamp("locked_until").toInstant()),
-                identifierHash);
+                (rs, i) -> new AttemptRow(rs.getInt("failed_count"), rs.getTimestamp("window_started_at").toInstant(),
+                        rs.getTimestamp("locked_until") == null ? null : rs.getTimestamp("locked_until").toInstant()), identifierHash);
         if (rows.isEmpty()) {
             jdbc.update("INSERT INTO identity.login_attempts(identifier_hash,failed_count,window_started_at,updated_at) VALUES (?,1,NOW(),NOW())", identifierHash);
             return;
@@ -332,15 +319,12 @@ public class AuthService {
         int count = resetWindow ? 1 : row.failedCount() + 1;
         Instant windowStart = resetWindow ? now : row.windowStartedAt();
         Instant lockedUntil = count >= maxFailedAttempts ? now.plus(lockMinutes, ChronoUnit.MINUTES) : null;
-        jdbc.update(
-                "UPDATE identity.login_attempts SET failed_count=?,window_started_at=?,locked_until=?,updated_at=NOW() WHERE identifier_hash=?",
+        jdbc.update("UPDATE identity.login_attempts SET failed_count=?,window_started_at=?,locked_until=?,updated_at=NOW() WHERE identifier_hash=?",
                 count, Timestamp.from(windowStart), lockedUntil == null ? null : Timestamp.from(lockedUntil), identifierHash);
     }
 
     private int revokeAllInternal(UUID userId, String reason) {
-        return jdbc.update(
-                "UPDATE identity.refresh_tokens SET revoked_at=NOW(),revoked_reason=? WHERE user_id=? AND revoked_at IS NULL",
-                reason, userId);
+        return jdbc.update("UPDATE identity.refresh_tokens SET revoked_at=NOW(),revoked_reason=? WHERE user_id=? AND revoked_at IS NULL", reason, userId);
     }
 
     private ApiException invalidRefresh() {
@@ -370,8 +354,7 @@ public class AuthService {
 
     private String sha256(String value) {
         try {
-            return java.util.HexFormat.of().formatHex(
-                    MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));
+            return java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));
         } catch (Exception e) {
             throw new IllegalStateException(e);
         }
