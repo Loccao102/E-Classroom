@@ -27,13 +27,17 @@ public class NotificationService {
 
     public void notifyGuardians(UUID schoolId, UUID studentId, String eventType, String title, String body,
                                 String entityType, UUID entityId, Map<String, Object> extraData) {
-        List<UUID> recipients = jdbc.query(
+        List<UUID> recipients = guardianRecipients(schoolId, studentId);
+        notifyUsers(schoolId, recipients, eventType, title, body, entityType, entityId, extraData);
+    }
+
+    public List<UUID> guardianRecipients(UUID schoolId, UUID studentId) {
+        return jdbc.query(
                 "SELECT DISTINCT g.user_id FROM academic.student_guardians sg " +
                         "JOIN academic.guardians g ON g.id=sg.guardian_id " +
                         "WHERE sg.school_id=? AND sg.student_id=? AND sg.notifications_enabled=TRUE " +
                         "AND g.user_id IS NOT NULL AND g.status='ACTIVE'",
                 (rs, i) -> UUID.fromString(rs.getString(1)), schoolId, studentId);
-        notifyUsers(schoolId, recipients, eventType, title, body, entityType, entityId, extraData);
     }
 
     public void notifyUsers(UUID schoolId, List<UUID> recipients, String eventType, String title, String body,
@@ -43,11 +47,9 @@ public class NotificationService {
 
     public void notifyUsers(UUID schoolId, List<UUID> recipients, String eventType, String title, String body,
                             String entityType, UUID entityId, Map<String, Object> extraData) {
-        if (recipients == null || recipients.isEmpty()) {
-            return;
-        }
+        List<UUID> safeRecipients = recipients == null ? List.of() : recipients.stream().distinct().toList();
         List<UUID> ids = new ArrayList<>();
-        for (UUID userId : recipients) {
+        for (UUID userId : safeRecipients) {
             UUID id = UUID.randomUUID();
             ids.add(id);
             jdbc.update(
@@ -63,7 +65,7 @@ public class NotificationService {
         data.put("title", title);
         data.put("body", body);
         data.put("notificationIds", ids);
-        outbox.emit(schoolId, eventType, 1, data, recipients);
+        outbox.emit(schoolId, eventType, 1, data, safeRecipients);
     }
 
     public List<Map<String, Object>> feed(UUID userId, int limit) {
