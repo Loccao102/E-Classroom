@@ -29,6 +29,18 @@ CREATE INDEX idx_parent_meetings_school_time
 CREATE INDEX idx_parent_meetings_scope
     ON communication.parent_meetings(school_id, scope_type, scope_id, starts_at DESC);
 
+-- Snapshot the students targeted when the meeting is created. This keeps
+-- historical audience/authorization stable even when enrollment later changes.
+CREATE TABLE communication.meeting_students (
+    school_id UUID NOT NULL REFERENCES school.schools(id),
+    meeting_id UUID NOT NULL REFERENCES communication.parent_meetings(id) ON DELETE CASCADE,
+    student_id UUID NOT NULL REFERENCES academic.students(id),
+    PRIMARY KEY(meeting_id, student_id)
+);
+
+CREATE INDEX idx_meeting_students_student
+    ON communication.meeting_students(school_id, student_id, meeting_id);
+
 CREATE TABLE communication.meeting_invitees (
     id UUID PRIMARY KEY,
     school_id UUID NOT NULL REFERENCES school.schools(id),
