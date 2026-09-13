@@ -5,6 +5,7 @@ import { AdminPage } from './features/admin/AdminPage'
 import { LoginPage } from './features/auth/LoginPage'
 import { CommunicationPage } from './features/communication/CommunicationPage'
 import { DashboardPage } from './features/dashboard/DashboardPage'
+import { MeetingPage } from './features/meetings/MeetingPage'
 import { NotificationsPage } from './features/notifications/NotificationsPage'
 import { ParentPage } from './features/parent/ParentPage'
 import { SecurityPage } from './features/security/SecurityPage'
@@ -12,7 +13,7 @@ import { StudentPage } from './features/student/StudentPage'
 import { StudentRecordsPage } from './features/timeline/StudentRecordsPage'
 import { TeacherPage } from './features/teacher/TeacherPage'
 
-type TabKey = 'dashboard' | 'admin' | 'teacher' | 'student-records' | 'parent' | 'student' | 'communication' | 'notifications' | 'security'
+type TabKey = 'dashboard' | 'admin' | 'teacher' | 'student-records' | 'parent' | 'student' | 'meetings' | 'communication' | 'notifications' | 'security'
 type NavItem = { key: TabKey; label: string; hint: string; mark: string }
 
 export default function App() {
@@ -74,6 +75,7 @@ export default function App() {
     if (isAdmin || isTeacher) items.push({ key: 'student-records', label: 'Hồ sơ học sinh', hint: 'Timeline & rèn luyện', mark: isAdmin ? '04' : '03' })
     if (isParent) items.push({ key: 'parent', label: 'Gia đình', hint: 'Theo dõi con', mark: '01' })
     if (isStudent) items.push({ key: 'student', label: 'Học tập', hint: 'Kết quả của tôi', mark: '01' })
+    items.push({ key: 'meetings', label: 'Lịch họp', hint: 'Lời mời & trao đổi', mark: '◷' })
     items.push({ key: 'communication', label: 'Liên lạc', hint: 'Thông báo & hội thoại', mark: '↗' })
     items.push({ key: 'notifications', label: 'Thông báo', hint: 'Cập nhật của bạn', mark: '•' })
     items.push({ key: 'security', label: 'Bảo mật', hint: 'Mật khẩu & thiết bị', mark: '⌁' })
@@ -113,6 +115,7 @@ export default function App() {
           {tab === 'student-records' && <StudentRecordsPage schoolId={schoolId} isAdmin={isAdmin} isTeacher={isTeacher} />}
           {tab === 'parent' && <ParentPage schoolId={schoolId} onOpenMessages={() => setTab('communication')} />}
           {tab === 'student' && <StudentPage schoolId={schoolId} />}
+          {tab === 'meetings' && <MeetingPage schoolId={schoolId} isAdmin={isAdmin} isTeacher={isTeacher} isParent={isParent} isStudent={isStudent} />}
           {tab === 'communication' && <CommunicationPage schoolId={schoolId} isAdmin={isAdmin} isTeacher={isTeacher} />}
           {tab === 'notifications' && <NotificationsPage schoolId={schoolId} onUnreadChange={setUnreadCount} />}
         </>}
@@ -124,4 +127,4 @@ export default function App() {
 
 function initials(value: string) { return value.split(/\s+/).filter(Boolean).slice(-2).map(part => part[0]).join('').toUpperCase() }
 function roleSummary(roles: string[], platformRole: string) { if (platformRole === 'SUPER_ADMIN') return 'Quản trị nền tảng'; const labels = roles.map(role => role === 'SCHOOL_ADMIN' ? 'Quản trị' : role === 'TEACHER' ? 'Giáo viên' : role === 'PARENT' ? 'Phụ huynh' : role === 'STUDENT' ? 'Học sinh' : role); return labels.join(' · ') || 'Thành viên' }
-function readableEvent(value: string) { if (value.includes('attendance')) return 'Có cập nhật điểm danh'; if (value.includes('score')) return 'Có điểm mới'; if (value.includes('conduct')) return 'Có ghi nhận rèn luyện mới'; if (value.includes('message')) return 'Có tin nhắn mới'; if (value.includes('announcement')) return 'Có thông báo mới'; return value }
+function readableEvent(value: string) { if (value.includes('attendance')) return 'Có cập nhật điểm danh'; if (value.includes('score')) return 'Có điểm mới'; if (value.includes('conduct')) return 'Có ghi nhận rèn luyện mới'; if (value.includes('meeting')) return 'Có cập nhật lịch họp'; if (value.includes('message')) return 'Có tin nhắn mới'; if (value.includes('announcement')) return 'Có thông báo mới'; return value }
