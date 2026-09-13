@@ -54,15 +54,12 @@ public class AcademicController {
     public record Semester(UUID academicYearId,String name,LocalDate startDate,LocalDate endDate){}
     public record Grade(String name,int sortOrder){}
     public record Subject(String code,String name){}
-    public record Teacher(@NotBlank String code,@NotBlank String fullName,@Email String email,String phone,@StrongPassword String password){}
-    public record Student(@NotBlank String code,@NotBlank String fullName,LocalDate dateOfBirth,String gender,@Email String email,@StrongPassword String password){}
-    public record Guardian(@NotBlank String fullName,@Email String email,String phone,@StrongPassword String password){}
+    public record Teacher(@NotBlank String code,@NotBlank String fullName,@Email String email,String phone,@Pattern(regexp="^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d).{10,128}$",message="Password must be 10-128 characters and include upper-case, lower-case and a number") String password){}
+    public record Student(@NotBlank String code,@NotBlank String fullName,LocalDate dateOfBirth,String gender,@Email String email,@Pattern(regexp="^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d).{10,128}$",message="Password must be 10-128 characters and include upper-case, lower-case and a number") String password){}
+    public record Guardian(@NotBlank String fullName,@Email String email,String phone,@Pattern(regexp="^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d).{10,128}$",message="Password must be 10-128 characters and include upper-case, lower-case and a number") String password){}
     public record LinkGuardian(@NotNull UUID studentId,@NotNull UUID guardianId,@NotBlank String relationship,boolean primaryContact){}
     public record Classroom(UUID academicYearId,UUID gradeLevelId,String code,String name,UUID homeroomTeacherId){}
     public record Enrollment(UUID classroomId,UUID studentId,LocalDate startDate){}
     public record Assignment(UUID teacherId,UUID classroomId,UUID subjectId,UUID semesterId){}
     public record Timetable(UUID teachingAssignmentId,int weekday,int period,String room,LocalDate validFrom,LocalDate validTo){}
-
-    @Pattern(regexp = "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d).{10,128}$", message = "Password must be 10-128 characters and include upper-case, lower-case and a number")
-    private @interface StrongPassword {}
 }
