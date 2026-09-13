@@ -200,7 +200,8 @@ class GradingWorkflowIntegrationTest {
         assertEquals("LOCKED", jdbc.queryForObject(
                 "SELECT status FROM grading.student_scores WHERE assessment_id=? AND student_id=?",
                 String.class, assessmentId, fixture.studentA()));
-        assertEquals(2L, tx.execute(status -> grading.lock(assessmentId, 1L, fixture.adminUser())));
+        long retryLockedVersion = tx.execute(status -> grading.lock(assessmentId, 1L, fixture.adminUser()));
+        assertEquals(2L, retryLockedVersion);
         assertEquals(1, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM integration.outbox_events WHERE event_type='assessment.locked' AND aggregate_id=?",
                 Integer.class, assessmentId));
