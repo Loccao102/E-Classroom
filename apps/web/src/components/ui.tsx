@@ -1,8 +1,14 @@
 import { FormEvent, ReactNode } from 'react'
 import type { Row } from '../app/types'
 
-export function Card({ title, actions, children }: { title: string; actions?: ReactNode; children: ReactNode }) {
-  return <section className="card"><div className="card-heading"><div className="card-title">{title}</div>{actions}</div>{children}</section>
+export type TableColumn = {
+  key: string
+  label: string
+  render?: (value: unknown, row: Row) => ReactNode
+}
+
+export function Card({ title, actions, children, className = '' }: { title: string; actions?: ReactNode; children: ReactNode; className?: string }) {
+  return <section className={`card ${className}`.trim()}><div className="card-heading"><div className="card-title">{title}</div>{actions}</div>{children}</section>
 }
 
 export function Empty({ text }: { text: string }) {
@@ -11,17 +17,17 @@ export function Empty({ text }: { text: string }) {
 
 export function Status({ children, tone = 'info' }: { children?: ReactNode; tone?: 'info' | 'error' | 'success' }) {
   if (!children) return null
-  return <p className={`status-line ${tone}`}>{children}</p>
+  return <p className={`status-line ${tone}`} role={tone === 'error' ? 'alert' : 'status'}>{children}</p>
 }
 
-export function Stat({ label, value, hint }: { label: string; value: unknown; hint?: string }) {
-  return <div className="stat"><span>{label}</span><strong>{String(value ?? 0)}</strong>{hint && <small>{hint}</small>}</div>
+export function Stat({ label, value, hint, emphasis = false }: { label: string; value: unknown; hint?: string; emphasis?: boolean }) {
+  return <div className={`stat ${emphasis ? 'emphasis' : ''}`}><span>{label}</span><strong>{String(value ?? 0)}</strong>{hint && <small>{hint}</small>}</div>
 }
 
-export function DataTable({ rows, columns }: { rows: Row[]; columns?: { key: string; label: string; render?: (value: unknown, row: Row) => ReactNode }[] }) {
+export function DataTable({ rows, columns, labelledBy }: { rows: Row[]; columns?: TableColumn[]; labelledBy?: string }) {
   if (!rows.length) return <Empty text="Chưa có dữ liệu" />
-  const selected = columns || Object.keys(rows[0]).slice(0, 7).map(key => ({ key, label: key.replaceAll('_', ' ') }))
-  return <div className="table-wrap"><table><thead><tr>{selected.map(column => <th key={column.key}>{column.label}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={String(row.id ?? index)}>{selected.map(column => <td key={column.key}>{column.render ? column.render(row[column.key], row) : display(row[column.key])}</td>)}</tr>)}</tbody></table></div>
+  const selected: TableColumn[] = columns ?? Object.keys(rows[0]).slice(0, 7).map(key => ({ key, label: key.replaceAll('_', ' ') }))
+  return <div className="table-wrap" role="region" aria-labelledby={labelledBy} tabIndex={0}><table><thead><tr>{selected.map(column => <th scope="col" key={column.key}>{column.label}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={String(row.id ?? row.studentId ?? index)}>{selected.map(column => <td key={column.key}>{column.render ? column.render(row[column.key], row) : display(row[column.key])}</td>)}</tr>)}</tbody></table></div>
 }
 
 export function Modal({ title, open, onClose, children }: { title: string; open: boolean; onClose: () => void; children: ReactNode }) {
@@ -39,6 +45,10 @@ export function Field({ label, hint, children }: { label: string; hint?: string;
 
 export function Badge({ children, tone = 'neutral' }: { children: ReactNode; tone?: 'neutral' | 'success' | 'warning' | 'danger' | 'info' }) {
   return <span className={`badge ${tone}`}>{children}</span>
+}
+
+export function SectionHeading({ eyebrow, title, description, actions }: { eyebrow?: string; title: string; description?: string; actions?: ReactNode }) {
+  return <div className="section-heading"><div>{eyebrow && <p className="eyebrow">{eyebrow}</p>}<h3>{title}</h3>{description && <p>{description}</p>}</div>{actions && <div className="page-actions">{actions}</div>}</div>
 }
 
 function display(value: unknown) {
