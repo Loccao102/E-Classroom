@@ -11,10 +11,13 @@ import tools.jackson.databind.json.JsonMapper;
 
 import java.security.MessageDigest;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -63,17 +66,33 @@ public class BulkImportJobService {
         jdbc.update("UPDATE integration.import_jobs SET status='PROCESSING',updated_at=NOW(),error_message=NULL WHERE id=?",jobId);
         try{
             List<BulkImportParser.RawRow> rows=parser.parse(job.format(),job.bytes()); jdbc.update("DELETE FROM integration.import_rows WHERE job_id=?",jobId);
-            int valid=0,invalid=0;
-            for(BulkImportParser.RawRow row:rows){BulkImportValidator.Validation v=validator.validate(job.schoolId(),job.type(),row.values());boolean ok=v.errors().isEmpty();if(ok)valid++;else invalid++;jdbc.update("INSERT INTO integration.import_rows(id,school_id,job_id,row_number,raw_data,normalized_data,status,errors,warnings) VALUES (?,?,?,?,CAST(? AS jsonb),CAST(? AS jsonb),?,CAST(? AS jsonb),CAST(? AS jsonb))",UUID.randomUUID(),job.schoolId(),jobId,row.rowNumber(),write(row.values()),write(v.normalized()),ok?"VALID":"INVALID",write(v.errors()),write(v.warnings()));}
+            int valid=0,invalid=0; Set<String> seen=new HashSet<>();
+            for(BulkImportParser.RawRow row:rows){
+                BulkImportValidator.Validation base=validator.validate(job.schoolId(),job.type(),row.values());
+                List<String> errors=new ArrayList<>(base.errors()); String key=duplicateKey(job.type(),base.normalized());
+                if(key!=null&&!seen.add(key))errors.add("Duplicate natural key in the same import file");
+                boolean ok=errors.isEmpty(); if(ok)valid++;else invalid++;
+                jdbc.update("INSERT INTO integration.import_rows(id,school_id,job_id,row_number,raw_data,normalized_data,status,errors,warnings) VALUES (?,?,?,?,CAST(? AS jsonb),CAST(? AS jsonb),?,CAST(? AS jsonb),CAST(? AS jsonb))",UUID.randomUUID(),job.schoolId(),jobId,row.rowNumber(),write(row.values()),write(base.normalized()),ok?"VALID":"INVALID",write(errors),write(base.warnings()));
+            }
             jdbc.update("UPDATE integration.import_jobs SET status=?,source_blob=NULL,total_rows=?,valid_rows=?,invalid_rows=?,version=version+1,updated_at=NOW() WHERE id=?",invalid==0?"PREVIEW_READY":"VALIDATION_FAILED",rows.size(),valid,invalid,jobId);
         }catch(Exception ex){jdbc.update("UPDATE integration.import_jobs SET status='FAILED',source_blob=NULL,error_message=?,version=version+1,updated_at=NOW() WHERE id=?",trim(ex.getMessage()),jobId);}
     }
 
     public ImportJobView job(UUID schoolId,UUID actor,UUID jobId){access.requireAnyRole(schoolId,actor,"SCHOOL_ADMIN");List<ImportJobView> rows=jdbc.query("SELECT id,import_type,source_format,source_file_name,status,total_rows,valid_rows,invalid_rows,error_message,version,created_at,committed_at FROM integration.import_jobs WHERE school_id=? AND id=?",(rs,i)->new ImportJobView(rs.getObject(1,UUID.class),rs.getString(2),rs.getString(3),rs.getString(4),rs.getString(5),rs.getInt(6),rs.getInt(7),rs.getInt(8),rs.getString(9),rs.getLong(10),rs.getObject(11,OffsetDateTime.class),rs.getObject(12,OffsetDateTime.class)),schoolId,jobId);if(rows.isEmpty())throw ApiException.notFound("Import job was not found");return rows.getFirst();}
     public List<ImportJobView> jobs(UUID schoolId,UUID actor){access.requireAnyRole(schoolId,actor,"SCHOOL_ADMIN");return jdbc.query("SELECT id,import_type,source_format,source_file_name,status,total_rows,valid_rows,invalid_rows,error_message,version,created_at,committed_at FROM integration.import_jobs WHERE school_id=? ORDER BY created_at DESC,id DESC LIMIT 100",(rs,i)->new ImportJobView(rs.getObject(1,UUID.class),rs.getString(2),rs.getString(3),rs.getString(4),rs.getString(5),rs.getInt(6),rs.getInt(7),rs.getInt(8),rs.getString(9),rs.getLong(10),rs.getObject(11,OffsetDateTime.class),rs.getObject(12,OffsetDateTime.class)),schoolId);}
-    public List<ImportRowView> preview(UUID schoolId,UUID actor,UUID jobId){job(schoolId,actor,jobId);return jdbc.query("SELECT row_number,raw_data::text,normalized_data::text,status,errors::text,warnings::text,committed_entity_id FROM integration.import_rows WHERE school_id=? AND job_id=? ORDER BY row_number LIMIT 500",(rs,i)->new ImportRowView(rs.getInt(1),readMap(rs.getString(2)),readMap(rs.getString(3)),rs.getString(4),readList(rs.getString(5)),readList(rs.getString(6)),rs.getObject(7,UUID.class)),schoolId,jobId);}
+    public List<ImportRowView> preview(UUID schoolId,UUID actor,UUID jobId,String status,int limit,int offset){
+        job(schoolId,actor,jobId); int bounded=Math.max(1,Math.min(limit,200)); int start=Math.max(0,offset);
+        String normalized=status==null?"":status.trim().toUpperCase(Locale.ROOT);
+        if(!normalized.isBlank()&&!Set.of("VALID","INVALID","COMMITTED").contains(normalized))throw ApiException.badRequest("INVALID_ROW_STATUS","Unsupported row status filter");
+        String sql="SELECT row_number,raw_data::text,normalized_data::text,status,errors::text,warnings::text,committed_entity_id FROM integration.import_rows WHERE school_id=? AND job_id=?"+(normalized.isBlank()?"":" AND status=?")+" ORDER BY row_number LIMIT ? OFFSET ?";
+        Object[] args=normalized.isBlank()?new Object[]{schoolId,jobId,bounded,start}:new Object[]{schoolId,jobId,normalized,bounded,start};
+        return jdbc.query(sql,(rs,i)->new ImportRowView(rs.getInt(1),readMap(rs.getString(2)),readMap(rs.getString(3)),rs.getString(4),readList(rs.getString(5)),readList(rs.getString(6)),rs.getObject(7,UUID.class)),args);
+    }
+    public List<ImportRowView> preview(UUID schoolId,UUID actor,UUID jobId){return preview(schoolId,actor,jobId,null,200,0);}
 
     public List<String> templateHeaders(String type){return validator.headers(type);}
+    private String duplicateKey(String type,Map<String,Object> n){return switch(type){case"STUDENT"->"student:"+value(n,"student_code");case"TEACHER"->"teacher:"+value(n,"teacher_code");case"GUARDIAN"->"guardian:"+value(n,"guardian_email");case"GUARDIAN_LINK"->"link:"+value(n,"student_code")+":"+value(n,"guardian_email");case"ENROLLMENT"->"enrollment:"+value(n,"academic_year")+":"+value(n,"classroom_code")+":"+value(n,"student_code");default->null;};}
+    private String value(Map<String,Object> n,String key){Object v=n.get(key);return v==null?"":String.valueOf(v).toLowerCase(Locale.ROOT);}
     private String format(String name){String n=name.toLowerCase(Locale.ROOT);if(n.endsWith(".csv"))return"CSV";if(n.endsWith(".xlsx"))return"XLSX";throw ApiException.badRequest("UNSUPPORTED_IMPORT_FORMAT","Only .csv and .xlsx files are supported");}
     private String safeFileName(String name){String n=name.replaceAll("[\\r\\n\\t]","_");return n.length()>255?n.substring(n.length()-255):n;}
     private String sha256(byte[] bytes){try{return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));}catch(Exception ex){throw new IllegalStateException(ex);}}
