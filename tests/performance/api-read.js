@@ -1,5 +1,6 @@
 import http from 'k6/http'
 import { check, sleep } from 'k6'
+import exec from 'k6/execution'
 import { Rate } from 'k6/metrics'
 
 const baseUrl = __ENV.BASE_URL || 'http://localhost:3000'
@@ -22,12 +23,16 @@ export const options = {
   },
 }
 
-function jsonHeaders(token) {
+function jsonHeaders(token, correlationSuffix) {
   return {
     Authorization: `Bearer ${token}`,
     'Content-Type': 'application/json',
-    'X-Correlation-Id': `perf-${__VU}-${__ITER}`,
+    'X-Correlation-Id': `perf-${correlationSuffix}`,
   }
+}
+
+function iterationCorrelationSuffix(endpoint) {
+  return `${endpoint}-${exec.vu.idInTest}-${exec.scenario.iterationInTest}`
 }
 
 export function setup() {
@@ -42,7 +47,7 @@ export function setup() {
 
   const tokens = login.json()
   const me = http.get(`${baseUrl}/api/v1/me`, {
-    headers: jsonHeaders(tokens.accessToken),
+    headers: jsonHeaders(tokens.accessToken, 'setup-me'),
     tags: { endpoint: 'setup-me' },
   })
 
@@ -58,7 +63,7 @@ export function setup() {
 
 function get(url, token, endpoint) {
   const response = http.get(url, {
-    headers: jsonHeaders(token),
+    headers: jsonHeaders(token, iterationCorrelationSuffix(endpoint)),
     tags: { endpoint },
   })
   const ok = check(response, { [`${endpoint} returns 200`]: (r) => r.status === 200 })
