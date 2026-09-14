@@ -2,6 +2,7 @@ package com.eclassroom.core.integration;
 
 import com.eclassroom.core.identity.AccessService;
 import com.eclassroom.core.shared.api.ApiException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,10 +32,16 @@ public class BulkImportJobService {
     private final BulkImportValidator validator;
     private final BulkImportRowRepository rowRepository;
 
+    @Autowired
     public BulkImportJobService(JdbcTemplate jdbc, AccessService access, JsonMapper json,
                                 BulkImportParser parser, BulkImportValidator validator,
                                 BulkImportRowRepository rowRepository) {
         this.jdbc=jdbc; this.access=access; this.json=json; this.parser=parser; this.validator=validator; this.rowRepository=rowRepository;
+    }
+
+    public BulkImportJobService(JdbcTemplate jdbc, AccessService access, JsonMapper json,
+                                BulkImportParser parser, BulkImportValidator validator) {
+        this(jdbc,access,json,parser,validator,new BulkImportRowRepository(jdbc));
     }
 
     @Transactional
