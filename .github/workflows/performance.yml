@@ -1,0 +1,113 @@
+name: Performance
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: Load profile
+        required: true
+        default: quick
+        type: choice
+        options: [quick, full]
+  schedule:
+    - cron: '30 18 * * 0'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: performance-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bulk-import-benchmark:
+    name: Bulk import 5k benchmark
+    if: github.event_name != 'pull_request' || startsWith(github.head_ref, 'perf/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: services/core-api
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Run performance integration tests
+        run: mvn -B -ntp -Pperformance-tests verify
+
+  load-test:
+    name: API and realtime load tests
+    if: github.event_name != 'pull_request' || startsWith(github.head_ref, 'perf/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      K6_IMAGE: grafana/k6:1.8.0
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Start stack
+        run: docker compose -f infra/docker-compose.yml up -d --build
+
+      - name: Wait for application
+        run: |
+          ready=0
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:3000/healthz >/dev/null; then ready=1; break; fi
+            sleep 3
+          done
+          test "$ready" = "1"
+          curl -fsS http://localhost:8080/actuator/health/readiness
+          curl -fsS http://localhost:8090/ready
+
+      - name: Select profile
+        id: profile
+        shell: bash
+        run: |
+          profile='${{ github.event.inputs.profile }}'
+          if [ -z "$profile" ]; then profile=quick; fi
+          if [ "$profile" = full ]; then
+            echo 'api_vus=75' >> "$GITHUB_OUTPUT"
+            echo 'api_duration=90s' >> "$GITHUB_OUTPUT"
+            echo 'ws_vus=250' >> "$GITHUB_OUTPUT"
+            echo 'ws_duration=60s' >> "$GITHUB_OUTPUT"
+            echo 'ws_hold_ms=10000' >> "$GITHUB_OUTPUT"
+          else
+            echo 'api_vus=20' >> "$GITHUB_OUTPUT"
+            echo 'api_duration=20s' >> "$GITHUB_OUTPUT"
+            echo 'ws_vus=50' >> "$GITHUB_OUTPUT"
+            echo 'ws_duration=20s' >> "$GITHUB_OUTPUT"
+            echo 'ws_hold_ms=5000' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Authenticated API load
+        run: |
+          docker run --rm --network host \
+            -v "$PWD:/work" -w /work \
+            -e BASE_URL=http://localhost:3000 \
+            -e API_VUS='${{ steps.profile.outputs.api_vus }}' \
+            -e API_DURATION='${{ steps.profile.outputs.api_duration }}' \
+            "$K6_IMAGE" run performance/k6/api-read.js
+
+      - name: Realtime WebSocket load
+        run: |
+          docker run --rm --network host \
+            -v "$PWD:/work" -w /work \
+            -e BASE_URL=http://localhost:3000 \
+            -e WS_BASE_URL=ws://localhost:8090 \
+            -e WS_VUS='${{ steps.profile.outputs.ws_vus }}' \
+            -e WS_DURATION='${{ steps.profile.outputs.ws_duration }}' \
+            -e WS_HOLD_MS='${{ steps.profile.outputs.ws_hold_ms }}' \
+            "$K6_IMAGE" run performance/k6/realtime-ws.js
+
+      - name: Dump service logs on failure
+        if: failure()
+        run: docker compose -f infra/docker-compose.yml logs --no-color --tail=500
+
+      - name: Stop stack
+        if: always()
+        run: docker compose -f infra/docker-compose.yml down -v --remove-orphans
