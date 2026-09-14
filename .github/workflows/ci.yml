@@ -102,7 +102,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Validate shell test harnesses
-        run: bash -n scripts/ci-smoke.sh scripts/perf/run.sh scripts/perf/db-sanity.sh
+        run: bash -n scripts/ci-smoke.sh scripts/perf/run.sh scripts/perf/db-sanity.sh scripts/perf/outbox-drain.sh
 
   full-stack-smoke:
     name: Full stack smoke test
