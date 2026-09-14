@@ -6,6 +6,8 @@ import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -16,6 +18,7 @@ import java.util.UUID;
 @Component
 public class BulkImportValidator {
     public static final Set<String> TYPES = Set.of("STUDENT", "TEACHER", "GUARDIAN", "GUARDIAN_LINK", "ENROLLMENT");
+    private static final int LOOKUP_CHUNK = 500;
     private final JdbcTemplate jdbc;
 
     public BulkImportValidator(JdbcTemplate jdbc) { this.jdbc = jdbc; }
@@ -37,13 +40,56 @@ public class BulkImportValidator {
         };
     }
 
+    public BatchContext prepare(UUID schoolId, String importType, List<BulkImportParser.RawRow> rows) {
+        String normalizedType = type(importType);
+        if (!Set.of("STUDENT", "TEACHER").contains(normalizedType)) return BatchContext.empty();
+
+        String codeField = "STUDENT".equals(normalizedType) ? "student_code" : "teacher_code";
+        Set<String> codes = new HashSet<>();
+        Set<String> emails = new HashSet<>();
+        for (BulkImportParser.RawRow row : rows) {
+            String code = opt(row.values().get(codeField));
+            if (code != null) codes.add(code.toUpperCase(Locale.ROOT));
+            String mail = opt(row.values().get("email"));
+            if (mail != null) emails.add(mail.toLowerCase(Locale.ROOT));
+        }
+
+        Set<String> existingCodes = new HashSet<>();
+        Map<String, UUID> ownUsers = new HashMap<>();
+        String table = "STUDENT".equals(normalizedType) ? "academic.students" : "academic.teachers";
+        String column = "STUDENT".equals(normalizedType) ? "student_code" : "teacher_code";
+        for (List<String> chunk : chunks(codes)) {
+            List<Object> args = new ArrayList<>();
+            args.add(schoolId);
+            args.addAll(chunk);
+            jdbc.query("SELECT " + column + ",user_id FROM " + table + " WHERE school_id=? AND " + column + " IN (" + placeholders(chunk.size()) + ")",
+                    rs -> {
+                        String key = rs.getString(1).toUpperCase(Locale.ROOT);
+                        existingCodes.add(key);
+                        UUID userId = rs.getObject(2, UUID.class);
+                        if (userId != null) ownUsers.put(key, userId);
+                    }, args.toArray());
+        }
+
+        Map<String, UUID> emailUsers = new HashMap<>();
+        for (List<String> chunk : chunks(emails)) {
+            jdbc.query("SELECT lower(email),id FROM identity.users WHERE lower(email) IN (" + placeholders(chunk.size()) + ")",
+                    rs -> emailUsers.put(rs.getString(1), rs.getObject(2, UUID.class)), chunk.toArray());
+        }
+        return new BatchContext(existingCodes, ownUsers, emailUsers);
+    }
+
     public Validation validate(UUID schoolId, String importType, Map<String,String> source) {
+        return validate(schoolId, importType, source, null);
+    }
+
+    public Validation validate(UUID schoolId, String importType, Map<String,String> source, BatchContext context) {
         Map<String,Object> n = new LinkedHashMap<>();
         List<String> errors = new ArrayList<>();
         List<String> warnings = new ArrayList<>();
         switch (type(importType)) {
-            case "STUDENT" -> student(schoolId, source, n, errors, warnings);
-            case "TEACHER" -> teacher(schoolId, source, n, errors, warnings);
+            case "STUDENT" -> student(schoolId, source, n, errors, warnings, context);
+            case "TEACHER" -> teacher(schoolId, source, n, errors, warnings, context);
             case "GUARDIAN" -> guardian(schoolId, source, n, errors, warnings);
             case "GUARDIAN_LINK" -> guardianLink(schoolId, source, n, errors);
             case "ENROLLMENT" -> enrollment(schoolId, source, n, errors, warnings);
@@ -51,21 +97,31 @@ public class BulkImportValidator {
         return new Validation(n, errors, warnings);
     }
 
-    private void student(UUID schoolId, Map<String,String> s, Map<String,Object> n, List<String> e, List<String> w) {
+    private void student(UUID schoolId, Map<String,String> s, Map<String,Object> n, List<String> e, List<String> w, BatchContext context) {
         String code = req(s,"student_code",e).toUpperCase(Locale.ROOT), name=req(s,"full_name",e), mail=email(s.get("email"),e);
         LocalDate dob=date(s.get("date_of_birth"),"date_of_birth",e,false); String gender=opt(s.get("gender"));
         n.put("student_code",code); n.put("full_name",name); n.put("date_of_birth",dob==null?null:dob.toString()); n.put("gender",gender); n.put("email",mail);
         if(mail==null)w.add("No email: profile will not receive a login account");
-        if(!code.isBlank()&&count("SELECT COUNT(*) FROM academic.students WHERE school_id=? AND student_code=?",schoolId,code)>0)w.add("Existing student code will be updated");
-        if(mail!=null&&emailUsedByOtherProfile(schoolId,"academic.students","student_code",code,mail))e.add("Email already belongs to a different account/profile");
+        if(context != null) {
+            if(!code.isBlank()&&context.existingCodes().contains(code))w.add("Existing student code will be updated");
+            if(mail!=null&&emailUsedByOtherProfile(context,code,mail))e.add("Email already belongs to a different account/profile");
+        } else {
+            if(!code.isBlank()&&count("SELECT COUNT(*) FROM academic.students WHERE school_id=? AND student_code=?",schoolId,code)>0)w.add("Existing student code will be updated");
+            if(mail!=null&&emailUsedByOtherProfile(schoolId,"academic.students","student_code",code,mail))e.add("Email already belongs to a different account/profile");
+        }
     }
 
-    private void teacher(UUID schoolId, Map<String,String> s, Map<String,Object> n, List<String> e, List<String> w) {
+    private void teacher(UUID schoolId, Map<String,String> s, Map<String,Object> n, List<String> e, List<String> w, BatchContext context) {
         String code=req(s,"teacher_code",e).toUpperCase(Locale.ROOT), name=req(s,"full_name",e), mail=email(s.get("email"),e), phone=opt(s.get("phone"));
         n.put("teacher_code",code); n.put("full_name",name); n.put("email",mail); n.put("phone",phone);
         if(mail==null)w.add("No email: profile will not receive a login account");
-        if(!code.isBlank()&&count("SELECT COUNT(*) FROM academic.teachers WHERE school_id=? AND teacher_code=?",schoolId,code)>0)w.add("Existing teacher code will be updated");
-        if(mail!=null&&emailUsedByOtherProfile(schoolId,"academic.teachers","teacher_code",code,mail))e.add("Email already belongs to a different account/profile");
+        if(context != null) {
+            if(!code.isBlank()&&context.existingCodes().contains(code))w.add("Existing teacher code will be updated");
+            if(mail!=null&&emailUsedByOtherProfile(context,code,mail))e.add("Email already belongs to a different account/profile");
+        } else {
+            if(!code.isBlank()&&count("SELECT COUNT(*) FROM academic.teachers WHERE school_id=? AND teacher_code=?",schoolId,code)>0)w.add("Existing teacher code will be updated");
+            if(mail!=null&&emailUsedByOtherProfile(schoolId,"academic.teachers","teacher_code",code,mail))e.add("Email already belongs to a different account/profile");
+        }
     }
 
     private void guardian(UUID schoolId, Map<String,String> s, Map<String,Object> n, List<String> e, List<String> w) {
@@ -95,11 +151,19 @@ public class BulkImportValidator {
         }
     }
 
+    private boolean emailUsedByOtherProfile(BatchContext context,String code,String mail){
+        UUID emailUser=context.emailUsers().get(mail.toLowerCase(Locale.ROOT));
+        if(emailUser==null)return false;
+        UUID own=context.ownUsers().get(code);
+        return own==null||!emailUser.equals(own);
+    }
     private boolean emailUsedByOtherProfile(UUID schoolId,String table,String codeColumn,String code,String mail){
         List<UUID> own=jdbc.query("SELECT user_id FROM "+table+" WHERE school_id=? AND "+codeColumn+"=? AND user_id IS NOT NULL",(rs,i)->rs.getObject(1,UUID.class),schoolId,code);
         List<UUID> emailUsers=jdbc.query("SELECT id FROM identity.users WHERE lower(email)=lower(?)",(rs,i)->rs.getObject(1,UUID.class),mail);
         return !emailUsers.isEmpty()&&(own.isEmpty()||!emailUsers.getFirst().equals(own.getFirst()));
     }
+    private List<List<String>> chunks(Set<String> values){List<String> all=new ArrayList<>(values);List<List<String>> out=new ArrayList<>();for(int i=0;i<all.size();i+=LOOKUP_CHUNK)out.add(all.subList(i,Math.min(i+LOOKUP_CHUNK,all.size())));return out;}
+    private String placeholders(int size){return String.join(",",java.util.Collections.nCopies(size,"?"));}
     private String req(Map<String,String>s,String key,List<String>e){String v=opt(s.get(key));if(v==null){e.add(key+" is required");return"";}return v;}
     private String opt(String v){if(v==null)return null;String x=v.trim();return x.isBlank()?null:x;}
     private String email(String v,List<String>e){String x=opt(v);if(x==null)return null;x=x.toLowerCase(Locale.ROOT);if(x.length()>255||!x.matches("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$"))e.add("email is invalid");return x;}
@@ -108,4 +172,7 @@ public class BulkImportValidator {
     private int count(String sql,Object...args){Integer n=jdbc.queryForObject(sql,Integer.class,args);return n==null?0:n;}
 
     public record Validation(Map<String,Object> normalized,List<String> errors,List<String> warnings){}
+    public record BatchContext(Set<String> existingCodes,Map<String,UUID> ownUsers,Map<String,UUID> emailUsers){
+        static BatchContext empty(){return new BatchContext(Set.of(),Map.of(),Map.of());}
+    }
 }
