@@ -108,7 +108,9 @@ stress:    5,000 rows
 `scripts/perf/outbox-drain.sh` inserts a bounded backlog directly into the transactional outbox using a valid realtime event envelope, then waits for both:
 
 - Java to mark all rows `published_at`;
-- the Go durable consumer to record all event IDs in `integration.consumer_inbox`.
+- the Go durable consumer's `/ready` `events.processed` counter to advance by at least the inserted event count.
+
+The gateway's event deduplication state is Redis-backed, so the benchmark intentionally measures the public readiness metric rather than assuming a PostgreSQL consumer inbox implementation.
 
 The script prints elapsed seconds and approximate events/second. Profiles use:
 
