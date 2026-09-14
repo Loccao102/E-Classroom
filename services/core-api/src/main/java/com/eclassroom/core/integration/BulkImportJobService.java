@@ -75,9 +75,10 @@ public class BulkImportJobService {
         jdbc.update("UPDATE integration.import_jobs SET status='PROCESSING',updated_at=NOW(),error_message=NULL WHERE id=?",jobId);
         try{
             List<BulkImportParser.RawRow> rows=parser.parse(job.format(),job.bytes());
+            BulkImportValidator.BatchContext context=validator.prepare(job.schoolId(),job.type(),rows);
             int valid=0,invalid=0; Set<String> seen=new HashSet<>(); List<BulkImportRowRepository.StagedRow> staged=new ArrayList<>(rows.size());
             for(BulkImportParser.RawRow row:rows){
-                BulkImportValidator.Validation base=validator.validate(job.schoolId(),job.type(),row.values());
+                BulkImportValidator.Validation base=validator.validate(job.schoolId(),job.type(),row.values(),context);
                 List<String> errors=new ArrayList<>(base.errors()); String key=duplicateKey(job.type(),base.normalized());
                 if(key!=null&&!seen.add(key))errors.add("Duplicate natural key in the same import file");
                 boolean ok=errors.isEmpty(); if(ok)valid++;else invalid++;
