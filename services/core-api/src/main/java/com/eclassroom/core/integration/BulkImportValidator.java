@@ -74,7 +74,7 @@ public class BulkImportValidator {
         Map<String, UUID> emailUsers = new HashMap<>();
         for (List<String> chunk : chunks(emails)) {
             jdbc.query("SELECT lower(email),id FROM identity.users WHERE lower(email) IN (" + placeholders(chunk.size()) + ")",
-                    rs -> emailUsers.put(rs.getString(1), rs.getObject(2, UUID.class)), chunk.toArray());
+                    rs -> { emailUsers.put(rs.getString(1), rs.getObject(2, UUID.class)); }, chunk.toArray());
         }
         return new BatchContext(existingCodes, ownUsers, emailUsers);
     }
