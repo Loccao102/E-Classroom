@@ -48,8 +48,12 @@ public class BulkDataController {
     }
 
     @GetMapping("/schools/{schoolId}/imports/{jobId}/rows")
-    public List<BulkImportJobService.ImportRowView> rows(@PathVariable UUID schoolId,@PathVariable UUID jobId,Authentication auth) {
-        return imports.preview(schoolId,CurrentUser.id(auth),jobId);
+    public List<BulkImportJobService.ImportRowView> rows(@PathVariable UUID schoolId,@PathVariable UUID jobId,
+                                                         @RequestParam(required=false) String status,
+                                                         @RequestParam(defaultValue="100") int limit,
+                                                         @RequestParam(defaultValue="0") int offset,
+                                                         Authentication auth) {
+        return imports.preview(schoolId,CurrentUser.id(auth),jobId,status,limit,offset);
     }
 
     @PostMapping("/schools/{schoolId}/imports/{jobId}/commit")
