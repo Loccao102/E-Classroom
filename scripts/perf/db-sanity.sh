@@ -4,6 +4,9 @@ set -euo pipefail
 compose=(docker compose -f infra/docker-compose.yml)
 
 required_indexes=(
+  idx_outbox_publish_queue
+  idx_notification_feed
+  idx_messages_conversation
   idx_attendance_sessions_reporting
   idx_attendance_records_reporting
   idx_assessments_reporting
@@ -49,6 +52,9 @@ ${compose[@]} exec -T postgres psql -U eclassroom -d eclassroom -P pager=off -c 
 SELECT schemaname, relname, indexrelname, idx_scan
 FROM pg_stat_user_indexes
 WHERE indexrelname = ANY (ARRAY[
+  'idx_outbox_publish_queue',
+  'idx_notification_feed',
+  'idx_messages_conversation',
   'idx_attendance_sessions_reporting',
   'idx_attendance_records_reporting',
   'idx_assessments_reporting',
