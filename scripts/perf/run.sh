@@ -64,6 +64,9 @@ case "$mode" in
       -e IMPORT_ROWS="${IMPORT_ROWS:-1000}" \
       -e IMPORT_ITERATIONS="${IMPORT_ITERATIONS:-1}"
     ;;
+  outbox)
+    bash scripts/perf/outbox-drain.sh
+    ;;
   db)
     bash scripts/perf/db-sanity.sh
     ;;
@@ -78,10 +81,11 @@ case "$mode" in
     run_k6 import-staging.js \
       -e IMPORT_ROWS="${IMPORT_ROWS:-1000}" \
       -e IMPORT_ITERATIONS="${IMPORT_ITERATIONS:-1}"
+    bash scripts/perf/outbox-drain.sh
     bash scripts/perf/db-sanity.sh
     ;;
   *)
-    echo "usage: $0 [api|ws|import|db|all]" >&2
+    echo "usage: $0 [api|ws|import|outbox|db|all]" >&2
     exit 2
     ;;
 esac
