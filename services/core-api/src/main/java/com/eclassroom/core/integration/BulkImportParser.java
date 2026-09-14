@@ -4,6 +4,7 @@ import com.eclassroom.core.shared.api.ApiException;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVParser;
 import org.apache.commons.csv.CSVRecord;
+import org.apache.commons.csv.DuplicateHeaderMode;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.DataFormatter;
 import org.apache.poi.ss.usermodel.Row;
@@ -42,8 +43,14 @@ public class BulkImportParser {
     }
 
     private List<RawRow> parseCsv(byte[] bytes) throws Exception {
+        CSVFormat format = CSVFormat.DEFAULT.builder()
+                .setHeader()
+                .setSkipHeaderRecord(true)
+                .setTrim(true)
+                .setDuplicateHeaderMode(DuplicateHeaderMode.DISALLOW)
+                .get();
         try (Reader reader = new InputStreamReader(new ByteArrayInputStream(bytes), StandardCharsets.UTF_8);
-             CSVParser parser = CSVFormat.DEFAULT.builder().setHeader().setSkipHeaderRecord(true).setTrim(true).get().parse(reader)) {
+             CSVParser parser = format.parse(reader)) {
             Map<String, Integer> rawHeaders = parser.getHeaderMap();
             if (rawHeaders.isEmpty()) throw ApiException.badRequest("IMPORT_HEADER_REQUIRED", "CSV header row is required");
             validateHeaders(rawHeaders.keySet().stream().map(this::normalizeHeader).toList());
