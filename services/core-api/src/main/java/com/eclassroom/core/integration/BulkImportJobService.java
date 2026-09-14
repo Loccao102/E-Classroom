@@ -29,10 +29,12 @@ public class BulkImportJobService {
     private final JsonMapper json;
     private final BulkImportParser parser;
     private final BulkImportValidator validator;
+    private final BulkImportRowRepository rowRepository;
 
     public BulkImportJobService(JdbcTemplate jdbc, AccessService access, JsonMapper json,
-                                BulkImportParser parser, BulkImportValidator validator) {
-        this.jdbc=jdbc; this.access=access; this.json=json; this.parser=parser; this.validator=validator;
+                                BulkImportParser parser, BulkImportValidator validator,
+                                BulkImportRowRepository rowRepository) {
+        this.jdbc=jdbc; this.access=access; this.json=json; this.parser=parser; this.validator=validator; this.rowRepository=rowRepository;
     }
 
     @Transactional
@@ -65,15 +67,16 @@ public class BulkImportJobService {
         if(jobs.isEmpty())return; JobSource job=jobs.getFirst(); if(!List.of("QUEUED","PROCESSING").contains(job.status()))return;
         jdbc.update("UPDATE integration.import_jobs SET status='PROCESSING',updated_at=NOW(),error_message=NULL WHERE id=?",jobId);
         try{
-            List<BulkImportParser.RawRow> rows=parser.parse(job.format(),job.bytes()); jdbc.update("DELETE FROM integration.import_rows WHERE job_id=?",jobId);
-            int valid=0,invalid=0; Set<String> seen=new HashSet<>();
+            List<BulkImportParser.RawRow> rows=parser.parse(job.format(),job.bytes());
+            int valid=0,invalid=0; Set<String> seen=new HashSet<>(); List<BulkImportRowRepository.StagedRow> staged=new ArrayList<>(rows.size());
             for(BulkImportParser.RawRow row:rows){
                 BulkImportValidator.Validation base=validator.validate(job.schoolId(),job.type(),row.values());
                 List<String> errors=new ArrayList<>(base.errors()); String key=duplicateKey(job.type(),base.normalized());
                 if(key!=null&&!seen.add(key))errors.add("Duplicate natural key in the same import file");
                 boolean ok=errors.isEmpty(); if(ok)valid++;else invalid++;
-                jdbc.update("INSERT INTO integration.import_rows(id,school_id,job_id,row_number,raw_data,normalized_data,status,errors,warnings) VALUES (?,?,?,?,CAST(? AS jsonb),CAST(? AS jsonb),?,CAST(? AS jsonb),CAST(? AS jsonb))",UUID.randomUUID(),job.schoolId(),jobId,row.rowNumber(),write(row.values()),write(base.normalized()),ok?"VALID":"INVALID",write(errors),write(base.warnings()));
+                staged.add(new BulkImportRowRepository.StagedRow(UUID.randomUUID(),job.schoolId(),row.rowNumber(),write(row.values()),write(base.normalized()),ok?"VALID":"INVALID",write(errors),write(base.warnings())));
             }
+            rowRepository.replace(jobId,staged);
             jdbc.update("UPDATE integration.import_jobs SET status=?,source_blob=NULL,total_rows=?,valid_rows=?,invalid_rows=?,version=version+1,updated_at=NOW() WHERE id=?",invalid==0?"PREVIEW_READY":"VALIDATION_FAILED",rows.size(),valid,invalid,jobId);
         }catch(Exception ex){jdbc.update("UPDATE integration.import_jobs SET status='FAILED',source_blob=NULL,error_message=?,version=version+1,updated_at=NOW() WHERE id=?",trim(ex.getMessage()),jobId);}
     }
