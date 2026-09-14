@@ -1,0 +1,81 @@
+name: Performance
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: Load profile to run
+        required: true
+        default: baseline
+        type: choice
+        options:
+          - smoke
+          - baseline
+          - stress
+  schedule:
+    - cron: '30 18 * * 0'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: performance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  load-and-performance:
+    name: Load and performance (${{ github.event.inputs.profile || 'baseline' }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Select load profile
+        shell: bash
+        run: |
+          set -euo pipefail
+          profile="${{ github.event.inputs.profile || 'baseline' }}"
+          case "$profile" in
+            smoke)
+              echo 'API_VUS=5' >> "$GITHUB_ENV"
+              echo 'API_DURATION=15s' >> "$GITHUB_ENV"
+              echo 'WS_VUS=20' >> "$GITHUB_ENV"
+              echo 'WS_DURATION=15s' >> "$GITHUB_ENV"
+              echo 'WS_HOLD_MS=5000' >> "$GITHUB_ENV"
+              echo 'IMPORT_ROWS=100' >> "$GITHUB_ENV"
+              ;;
+            baseline)
+              echo 'API_VUS=20' >> "$GITHUB_ENV"
+              echo 'API_DURATION=30s' >> "$GITHUB_ENV"
+              echo 'WS_VUS=50' >> "$GITHUB_ENV"
+              echo 'WS_DURATION=30s' >> "$GITHUB_ENV"
+              echo 'WS_HOLD_MS=10000' >> "$GITHUB_ENV"
+              echo 'IMPORT_ROWS=1000' >> "$GITHUB_ENV"
+              ;;
+            stress)
+              echo 'API_VUS=75' >> "$GITHUB_ENV"
+              echo 'API_DURATION=60s' >> "$GITHUB_ENV"
+              echo 'WS_VUS=250' >> "$GITHUB_ENV"
+              echo 'WS_DURATION=60s' >> "$GITHUB_ENV"
+              echo 'WS_HOLD_MS=20000' >> "$GITHUB_ENV"
+              echo 'IMPORT_ROWS=5000' >> "$GITHUB_ENV"
+              ;;
+            *)
+              echo "Unknown profile: $profile" >&2
+              exit 2
+              ;;
+          esac
+
+      - name: Run performance suite
+        env:
+          KEEP_PERF_STACK: '1'
+          K6_IMAGE: grafana/k6:2.2.0
+        run: bash scripts/perf/run.sh all
+
+      - name: Dump service logs on failure
+        if: failure()
+        run: docker compose -f infra/docker-compose.yml logs --no-color
+
+      - name: Stop performance stack
+        if: always()
+        run: docker compose -f infra/docker-compose.yml down -v --remove-orphans
