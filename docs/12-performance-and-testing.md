@@ -52,7 +52,7 @@ It is not a load test. Its job is cross-service correctness.
 
 ## Performance suite
 
-Performance scenarios live under `tests/performance/` and use k6. The repository pins the performance runner to `grafana/k6:2.2.0` so local and CI measurements use the same engine.
+Performance scenarios live under `tests/performance/` and `scripts/perf/`. The repository pins the k6 runner to `grafana/k6:2.2.0` so local and CI measurements use the same engine.
 
 ### API read path
 
@@ -103,6 +103,23 @@ stress:    5,000 rows
 
 5,000 rows is the current V1 import boundary.
 
+### Outbox drain throughput
+
+`scripts/perf/outbox-drain.sh` inserts a bounded backlog directly into the transactional outbox using a valid realtime event envelope, then waits for both:
+
+- Java to mark all rows `published_at`;
+- the Go durable consumer to record all event IDs in `integration.consumer_inbox`.
+
+The script prints elapsed seconds and approximate events/second. Profiles use:
+
+```text
+smoke:       25 events
+baseline:   250 events
+stress:   1,000 events
+```
+
+This scenario measures the asynchronous delivery spine without pretending it is an end-user HTTP benchmark.
+
 ### Database sanity
 
 `scripts/perf/db-sanity.sh` verifies that known hot-path indexes actually exist after Flyway migration and prints table-size/index-usage snapshots.
@@ -123,6 +140,7 @@ Or run one layer:
 bash scripts/perf/run.sh api
 bash scripts/perf/run.sh ws
 bash scripts/perf/run.sh import
+bash scripts/perf/run.sh outbox
 bash scripts/perf/run.sh db
 ```
 
@@ -132,6 +150,7 @@ Useful overrides:
 API_VUS=40 API_DURATION=60s bash scripts/perf/run.sh api
 WS_VUS=200 WS_DURATION=60s WS_HOLD_MS=15000 bash scripts/perf/run.sh ws
 IMPORT_ROWS=5000 bash scripts/perf/run.sh import
+OUTBOX_COUNT=1000 OUTBOX_TIMEOUT_SECONDS=60 bash scripts/perf/run.sh outbox
 KEEP_PERF_STACK=1 bash scripts/perf/run.sh all
 ```
 
@@ -143,15 +162,15 @@ The runner starts from a clean Docker Compose environment by default and removes
 
 Profiles:
 
-| Profile | API | WebSocket | Import |
-| --- | --- | --- | --- |
-| smoke | 5 VUs / 15s | 20 VUs / 15s | 100 rows |
-| baseline | 20 VUs / 30s | 50 VUs / 30s | 1,000 rows |
-| stress | 75 VUs / 60s | 250 VUs / 60s | 5,000 rows |
+| Profile | API | WebSocket | Import | Outbox |
+| --- | --- | --- | --- | --- |
+| smoke | 5 VUs / 15s | 20 VUs / 15s | 100 rows | 25 events |
+| baseline | 20 VUs / 30s | 50 VUs / 30s | 1,000 rows | 250 events |
+| stress | 75 VUs / 60s | 250 VUs / 60s | 5,000 rows | 1,000 events |
 
-The scheduled run uses `baseline`. `stress` is intended for explicit manual runs only.
+Pull requests that modify the performance harness run `smoke`. The scheduled run uses `baseline`. `stress` is intended for explicit manual runs only.
 
-Normal pull-request CI should remain fast and deterministic; performance tests are noisy by nature and should not block every code change until a stable historical baseline exists.
+Normal product pull requests should remain fast and deterministic; performance tests are noisy by nature and should not block every code change until a stable historical baseline exists.
 
 ## Interpreting results
 
@@ -183,6 +202,12 @@ Import staging slow
  -> validation query count
  -> JDBC batch behavior
  -> PostgreSQL WAL/index pressure
+
+Outbox drain slow
+ -> publisher claim/batch settings
+ -> PostgreSQL queue index and lock contention
+ -> NATS publish latency
+ -> Go durable-consumer throughput
 ```
 
 ## Next measurement targets
@@ -193,7 +218,6 @@ After the baseline suite is stable, add representative seeded-volume scenarios f
 - large timeline histories;
 - attendance write batches for 30/60/200 students;
 - score batches up to the API boundary;
-- outbox backlog drain rate;
 - 1k, then 5k and 10k websocket connections on hardware sized for that experiment.
 
 Those numbers should not be claimed until they have actually been measured.
