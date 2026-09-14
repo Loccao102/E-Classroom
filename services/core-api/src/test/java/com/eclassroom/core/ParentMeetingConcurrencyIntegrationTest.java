@@ -92,7 +92,7 @@ class ParentMeetingConcurrencyIntegrationTest {
             assertTrue(Set.of("VERSION_CONFLICT", "MEETING_SLOT_BOOKED").contains(loser.code()));
 
             assertEquals(1, count("SELECT COUNT(*) FROM communication.meeting_slots WHERE id=? AND booked_by_guardian_user_id IS NOT NULL", slot.id()));
-            assertEquals(1, count("SELECT COUNT(*) FROM audit.audit_log WHERE entity_type='MEETING_SLOT' AND entity_id=? AND action='BOOK_SLOT'", slot.id()));
+            assertEquals(1, count("SELECT COUNT(*) FROM audit.audit_entries WHERE entity_type='MEETING_SLOT' AND entity_id=? AND action='BOOK_SLOT'", slot.id()));
             Long version = jdbc.queryForObject("SELECT version FROM communication.meeting_slots WHERE id=?", Long.class, slot.id());
             assertEquals(1L, version);
         } finally {
