@@ -7,7 +7,14 @@ import java.util.UUID;
 
 @Service
 public class BulkImportProcessor {
-    private final BulkImportService imports;
-    public BulkImportProcessor(BulkImportService imports){this.imports=imports;}
-    @Async public void processAsync(UUID jobId){imports.process(jobId);}
+    private final BulkImportJobService jobs;
+
+    public BulkImportProcessor(BulkImportJobService jobs) {
+        this.jobs = jobs;
+    }
+
+    @Async
+    public void processAsync(UUID jobId) {
+        jobs.process(jobId);
+    }
 }
