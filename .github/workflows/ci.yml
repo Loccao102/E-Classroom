@@ -8,32 +8,38 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   java-core:
     name: Java Core API
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: services/core-api
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '21'
           cache: maven
       - name: Build and test
-        run: mvn -B verify
+        run: mvn -B -ntp verify
 
   go-realtime:
     name: Go Realtime Gateway
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: services/realtime-gateway
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.27.x'
           cache-dependency-path: services/realtime-gateway/go.sum
@@ -55,14 +61,16 @@ jobs:
   web:
     name: Web application
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: apps/web
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
+          package-manager-cache: false
       - name: Install dependencies
         run: npm install --no-audit --no-fund
       - name: Typecheck and build
@@ -71,9 +79,10 @@ jobs:
   full-stack-smoke:
     name: Full stack smoke test
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: [java-core, go-realtime, web]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Run smoke suite
         run: bash scripts/ci-smoke.sh
       - name: Dump logs on failure
@@ -81,4 +90,4 @@ jobs:
         run: docker compose -f infra/docker-compose.yml logs --no-color
       - name: Stop stack
         if: always()
-        run: docker compose -f infra/docker-compose.yml down -v
+        run: docker compose -f infra/docker-compose.yml down -v --remove-orphans
