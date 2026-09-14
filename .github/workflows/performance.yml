@@ -35,6 +35,7 @@ jobs:
     timeout-minutes: 35
     env:
       KEEP_PERF_STACK: '1'
+      PERF_SKIP_STACK_START: '1'
       K6_IMAGE: grafana/k6:2.2.0
     steps:
       - uses: actions/checkout@v7
@@ -82,6 +83,9 @@ jobs:
               exit 2
               ;;
           esac
+
+      - name: Prepare performance stack
+        run: bash scripts/perf/run.sh prepare
 
       - name: Run API read workload
         run: bash scripts/perf/run.sh api
