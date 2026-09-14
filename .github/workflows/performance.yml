@@ -54,6 +54,7 @@ jobs:
               echo 'WS_DURATION=15s' >> "$GITHUB_ENV"
               echo 'WS_HOLD_MS=5000' >> "$GITHUB_ENV"
               echo 'IMPORT_ROWS=100' >> "$GITHUB_ENV"
+              echo 'OUTBOX_COUNT=25' >> "$GITHUB_ENV"
               ;;
             baseline)
               echo 'API_VUS=20' >> "$GITHUB_ENV"
@@ -62,6 +63,7 @@ jobs:
               echo 'WS_DURATION=30s' >> "$GITHUB_ENV"
               echo 'WS_HOLD_MS=10000' >> "$GITHUB_ENV"
               echo 'IMPORT_ROWS=1000' >> "$GITHUB_ENV"
+              echo 'OUTBOX_COUNT=250' >> "$GITHUB_ENV"
               ;;
             stress)
               echo 'API_VUS=75' >> "$GITHUB_ENV"
@@ -70,6 +72,7 @@ jobs:
               echo 'WS_DURATION=60s' >> "$GITHUB_ENV"
               echo 'WS_HOLD_MS=20000' >> "$GITHUB_ENV"
               echo 'IMPORT_ROWS=5000' >> "$GITHUB_ENV"
+              echo 'OUTBOX_COUNT=1000' >> "$GITHUB_ENV"
               ;;
             *)
               echo "Unknown profile: $profile" >&2
