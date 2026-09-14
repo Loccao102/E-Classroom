@@ -1,5 +1,6 @@
 import http from 'k6/http'
 import { check, sleep } from 'k6'
+import exec from 'k6/execution'
 import { Rate, Trend } from 'k6/metrics'
 
 const baseUrl = __ENV.BASE_URL || 'http://localhost:3000'
@@ -20,12 +21,16 @@ export const options = {
   },
 }
 
-function authHeaders(token, extra = {}) {
+function authHeaders(token, correlationSuffix, extra = {}) {
   return {
     Authorization: `Bearer ${token}`,
-    'X-Correlation-Id': `perf-import-${__VU}-${__ITER}`,
+    'X-Correlation-Id': `perf-import-${correlationSuffix}`,
     ...extra,
   }
+}
+
+function iterationId() {
+  return `${exec.vu.idInTest}-${exec.scenario.iterationInTest}`
 }
 
 export function setup() {
@@ -39,7 +44,7 @@ export function setup() {
   }
 
   const token = login.json('accessToken')
-  const me = http.get(`${baseUrl}/api/v1/me`, { headers: authHeaders(token) })
+  const me = http.get(`${baseUrl}/api/v1/me`, { headers: authHeaders(token, 'setup-me') })
   if (!check(me, { 'setup me succeeds': (r) => r.status === 200 })) {
     throw new Error(`Import setup /me failed with status ${me.status}`)
   }
@@ -59,7 +64,8 @@ function csvFixture(prefix) {
 }
 
 export default function (data) {
-  const unique = `${Date.now()}-${__ITER}`
+  const iteration = iterationId()
+  const unique = `${Date.now()}-${iteration}`
   const csv = csvFixture(`P${unique.replace(/\D/g, '').slice(-10)}`)
   const idempotencyKey = `perf-${unique}`
   const startedAt = Date.now()
@@ -67,7 +73,7 @@ export default function (data) {
   const stage = http.post(
     `${baseUrl}/api/v1/schools/${data.schoolId}/imports?type=STUDENT`,
     { file: http.file(csv, `students-${unique}.csv`, 'text/csv') },
-    { headers: authHeaders(data.token, { 'Idempotency-Key': idempotencyKey }), tags: { endpoint: 'import-stage' } },
+    { headers: authHeaders(data.token, `${iteration}-stage`, { 'Idempotency-Key': idempotencyKey }), tags: { endpoint: 'import-stage' } },
   )
 
   const staged = check(stage, { 'import stage accepted': (r) => r.status === 200 })
@@ -81,7 +87,7 @@ export default function (data) {
   for (let i = 0; i < maxPolls; i += 1) {
     sleep(pollSeconds)
     const job = http.get(`${baseUrl}/api/v1/schools/${data.schoolId}/imports/${jobId}`, {
-      headers: authHeaders(data.token),
+      headers: authHeaders(data.token, `${iteration}-poll-${i}`),
       tags: { endpoint: 'import-poll' },
     })
     if (!check(job, { 'import poll succeeds': (r) => r.status === 200 })) {
