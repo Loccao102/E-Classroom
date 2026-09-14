@@ -1,6 +1,8 @@
 name: Performance
 
 on:
+  pull_request:
+    branches: [main]
   workflow_dispatch:
     inputs:
       profile:
@@ -16,12 +18,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: performance-${{ github.ref }}
+  group: performance-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   bulk-import-benchmark:
     name: Bulk import 5k benchmark
+    if: github.event_name != 'pull_request' || startsWith(github.head_ref, 'perf/')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
@@ -39,6 +42,7 @@ jobs:
 
   load-test:
     name: API and realtime load tests
+    if: github.event_name != 'pull_request' || startsWith(github.head_ref, 'perf/')
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
