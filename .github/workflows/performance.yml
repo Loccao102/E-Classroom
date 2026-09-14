@@ -12,6 +12,12 @@ on:
           - smoke
           - baseline
           - stress
+  pull_request:
+    paths:
+      - '.github/workflows/performance.yml'
+      - 'tests/performance/**'
+      - 'scripts/perf/**'
+      - 'infra/**'
   schedule:
     - cron: '30 18 * * 0'
 
@@ -24,7 +30,7 @@ concurrency:
 
 jobs:
   load-and-performance:
-    name: Load and performance (${{ github.event.inputs.profile || 'baseline' }})
+    name: Load and performance
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -34,7 +40,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          profile="${{ github.event.inputs.profile || 'baseline' }}"
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            profile=smoke
+          else
+            profile="${{ github.event.inputs.profile || 'baseline' }}"
+          fi
+          echo "PERF_PROFILE=$profile" >> "$GITHUB_ENV"
           case "$profile" in
             smoke)
               echo 'API_VUS=5' >> "$GITHUB_ENV"
