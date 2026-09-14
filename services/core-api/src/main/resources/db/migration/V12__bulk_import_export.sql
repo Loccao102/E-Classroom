@@ -1,3 +1,6 @@
+ALTER TABLE academic.students
+    ADD COLUMN IF NOT EXISTS email VARCHAR(255);
+
 CREATE TABLE integration.import_jobs (
     id UUID PRIMARY KEY,
     school_id UUID NOT NULL REFERENCES school.schools(id),
