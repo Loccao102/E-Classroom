@@ -17,10 +17,12 @@ import java.io.InputStreamReader;
 import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 @Component
 public class BulkImportParser {
@@ -29,9 +31,8 @@ public class BulkImportParser {
     public List<RawRow> parse(String format, byte[] bytes) {
         try {
             List<RawRow> rows = "CSV".equals(format) ? parseCsv(bytes) : parseXlsx(bytes);
-            if (rows.size() > MAX_ROWS) {
-                throw ApiException.badRequest("IMPORT_TOO_MANY_ROWS", "Import files may contain at most 5000 data rows");
-            }
+            if (rows.size() > MAX_ROWS) throw ApiException.badRequest("IMPORT_TOO_MANY_ROWS", "Import files may contain at most 5000 data rows");
+            if (rows.isEmpty()) throw ApiException.badRequest("IMPORT_EMPTY_FILE", "Import file contains no data rows");
             return rows;
         } catch (ApiException ex) {
             throw ex;
@@ -43,14 +44,13 @@ public class BulkImportParser {
     private List<RawRow> parseCsv(byte[] bytes) throws Exception {
         try (Reader reader = new InputStreamReader(new ByteArrayInputStream(bytes), StandardCharsets.UTF_8);
              CSVParser parser = CSVFormat.DEFAULT.builder().setHeader().setSkipHeaderRecord(true).setTrim(true).get().parse(reader)) {
+            Map<String, Integer> rawHeaders = parser.getHeaderMap();
+            if (rawHeaders.isEmpty()) throw ApiException.badRequest("IMPORT_HEADER_REQUIRED", "CSV header row is required");
+            validateHeaders(rawHeaders.keySet().stream().map(this::normalizeHeader).toList());
             List<RawRow> result = new ArrayList<>();
-            Map<String, Integer> headers = parser.getHeaderMap();
-            if (headers.isEmpty()) throw ApiException.badRequest("IMPORT_HEADER_REQUIRED", "CSV header row is required");
             for (CSVRecord record : parser) {
                 Map<String, String> values = new LinkedHashMap<>();
-                for (String header : headers.keySet()) {
-                    values.put(normalizeHeader(header), record.isMapped(header) ? record.get(header).trim() : "");
-                }
+                for (String header : rawHeaders.keySet()) values.put(normalizeHeader(header), record.isMapped(header) ? record.get(header).trim() : "");
                 if (values.values().stream().allMatch(String::isBlank)) continue;
                 result.add(new RawRow((int) record.getRecordNumber() + 1, values));
             }
@@ -66,9 +66,11 @@ public class BulkImportParser {
             Row header = sheet.getRow(sheet.getFirstRowNum());
             if (header == null) throw ApiException.badRequest("IMPORT_HEADER_REQUIRED", "Spreadsheet header row is required");
             List<String> headers = new ArrayList<>();
-            for (Cell cell : header) headers.add(normalizeHeader(formatter.formatCellValue(cell)));
-            if (headers.stream().allMatch(String::isBlank)) throw ApiException.badRequest("IMPORT_HEADER_REQUIRED", "Spreadsheet header row is required");
-
+            for (int c = 0; c < header.getLastCellNum(); c++) {
+                Cell cell = header.getCell(c, Row.MissingCellPolicy.RETURN_BLANK_AS_NULL);
+                headers.add(normalizeHeader(cell == null ? "" : formatter.formatCellValue(cell)));
+            }
+            validateHeaders(headers);
             List<RawRow> result = new ArrayList<>();
             for (int r = header.getRowNum() + 1; r <= sheet.getLastRowNum(); r++) {
                 Row data = sheet.getRow(r);
@@ -87,8 +89,17 @@ public class BulkImportParser {
         }
     }
 
+    private void validateHeaders(List<String> headers) {
+        if (headers.isEmpty() || headers.size() > 64) throw ApiException.badRequest("IMPORT_HEADERS_INVALID", "Import must contain 1-64 columns");
+        Set<String> seen = new HashSet<>();
+        for (String header : headers) {
+            if (header.isBlank() || !seen.add(header)) throw ApiException.badRequest("IMPORT_HEADERS_INVALID", "Headers must be unique and non-empty");
+        }
+    }
+
     private String normalizeHeader(String value) {
-        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT).replace(' ', '_').replace('-', '_');
+        String header = value == null ? "" : value.replace("\uFEFF", "").trim().toLowerCase(Locale.ROOT);
+        return header.replaceAll("[^a-z0-9]+", "_").replaceAll("^_+|_+$", "");
     }
 
     public record RawRow(int rowNumber, Map<String, String> values) {}
