@@ -32,6 +32,11 @@ wait_for_stack() {
   fi
 }
 
+prepare_stack() {
+  "${compose[@]}" up -d --build
+  wait_for_stack
+}
+
 run_k6() {
   local script="$1"
   shift
@@ -44,8 +49,17 @@ run_k6() {
     "$k6_image" run "/scripts/$script"
 }
 
-"${compose[@]}" up -d --build
-wait_for_stack
+if [[ "$mode" == "prepare" ]]; then
+  prepare_stack
+  exit 0
+fi
+
+if [[ "${PERF_SKIP_STACK_START:-0}" != "1" ]]; then
+  prepare_stack
+else
+  # Fail quickly if a CI preparation step did not actually leave a healthy stack.
+  curl -fsS http://localhost:3000/healthz >/dev/null
+fi
 
 case "$mode" in
   api)
@@ -85,7 +99,7 @@ case "$mode" in
     bash scripts/perf/db-sanity.sh
     ;;
   *)
-    echo "usage: $0 [api|ws|import|outbox|db|all]" >&2
+    echo "usage: $0 [prepare|api|ws|import|outbox|db|all]" >&2
     exit 2
     ;;
 esac
