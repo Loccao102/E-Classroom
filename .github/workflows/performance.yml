@@ -33,6 +33,9 @@ jobs:
     name: Load and performance
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    env:
+      KEEP_PERF_STACK: '1'
+      K6_IMAGE: grafana/k6:2.2.0
     steps:
       - uses: actions/checkout@v7
 
@@ -80,11 +83,20 @@ jobs:
               ;;
           esac
 
-      - name: Run performance suite
-        env:
-          KEEP_PERF_STACK: '1'
-          K6_IMAGE: grafana/k6:2.2.0
-        run: bash scripts/perf/run.sh all
+      - name: Run API read workload
+        run: bash scripts/perf/run.sh api
+
+      - name: Run realtime connection workload
+        run: bash scripts/perf/run.sh ws
+
+      - name: Run import staging workload
+        run: bash scripts/perf/run.sh import
+
+      - name: Run outbox drain workload
+        run: bash scripts/perf/run.sh outbox
+
+      - name: Run database sanity checks
+        run: bash scripts/perf/run.sh db
 
       - name: Dump service logs on failure
         if: failure()
