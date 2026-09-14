@@ -3,6 +3,7 @@ import { api } from '../../api'
 import type { Row } from '../../app/types'
 import { Card, DataTable, DialogForm, Field, Modal, SectionHeading, Status } from '../../components/ui'
 import { AccountManagementPanel } from './AccountManagementPanel'
+import { BulkDataPanel } from './BulkDataPanel'
 import { SetupWizard, type SetupKind } from './SetupWizard'
 
 type CreateKind = 'student' | 'teacher' | 'guardian' | 'subject'
@@ -46,6 +47,8 @@ export function AdminPage({ schoolId }: { schoolId: string }) {
     <Status>{message}</Status><Status tone="error">{error}</Status>
 
     <section className="setup-journey" aria-labelledby="setup-title"><div className="setup-copy"><p className="eyebrow">Guided setup</p><h3 id="setup-title">Từ dữ liệu rời rạc thành một lớp học hoạt động</h3><p>Đi theo thứ tự gợi ý khi khởi tạo trường mới, hoặc mở bất kỳ bước nào để bổ sung dữ liệu.</p></div><div className="setup-steps">{setupSteps.map(item => <button key={item.kind} onClick={() => setSetupKind(item.kind)}><span>{item.step}</span><div><strong>{item.title}</strong><small>{item.copy}</small></div><em>→</em></button>)}</div></section>
+
+    <BulkDataPanel schoolId={schoolId} />
 
     <AccountManagementPanel schoolId={schoolId} />
 
