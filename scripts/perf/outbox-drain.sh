@@ -30,6 +30,12 @@ if [[ -z "${school_id:-}" || -z "${user_id:-}" ]]; then
   exit 1
 fi
 
+baseline_processed="$(curl -fsS http://localhost:8090/ready | jq -r '.events.processed // 0')"
+if ! [[ "$baseline_processed" =~ ^[0-9]+$ ]]; then
+  echo "Realtime readiness did not expose a numeric events.processed counter" >&2
+  exit 1
+fi
+
 ${compose[@]} exec -T postgres psql -U eclassroom -d eclassroom -v ON_ERROR_STOP=1 \
   -v school_id="$school_id" -v user_id="$user_id" -v run_id="$run_id" -v event_count="$count" <<'SQL'
 WITH generated AS (
@@ -69,14 +75,16 @@ SQL
 started_at="$(date +%s)"
 deadline=$((started_at + timeout_seconds))
 remaining="$count"
-processed=0
+processed_delta=0
 
 while (( $(date +%s) <= deadline )); do
   remaining="$(${compose[@]} exec -T postgres psql -U eclassroom -d eclassroom -Atc \
     "SELECT COUNT(*) FROM integration.outbox_events WHERE correlation_id LIKE '${run_id}-%' AND published_at IS NULL" | tr -d '\r')"
-  processed="$(${compose[@]} exec -T postgres psql -U eclassroom -d eclassroom -Atc \
-    "SELECT COUNT(*) FROM integration.consumer_inbox i JOIN integration.outbox_events o ON o.id=i.event_id WHERE o.correlation_id LIKE '${run_id}-%'" | tr -d '\r')"
-  if [[ "$remaining" == "0" && "$processed" == "$count" ]]; then
+  current_processed="$(curl -fsS http://localhost:8090/ready | jq -r '.events.processed // 0')"
+  if [[ "$current_processed" =~ ^[0-9]+$ ]] && (( current_processed >= baseline_processed )); then
+    processed_delta=$((current_processed - baseline_processed))
+  fi
+  if [[ "$remaining" == "0" ]] && (( processed_delta >= count )); then
     break
   fi
   sleep 1
@@ -92,9 +100,9 @@ echo "Events: $count"
 echo "Elapsed: ${elapsed}s"
 echo "Approx throughput: ${rate} events/s"
 echo "Unpublished: $remaining"
-echo "Consumer processed: $processed"
+echo "Realtime processed delta: $processed_delta"
 
-if [[ "$remaining" != "0" || "$processed" != "$count" ]]; then
+if [[ "$remaining" != "0" ]] || (( processed_delta < count )); then
   echo "Outbox drain did not finish within ${timeout_seconds}s" >&2
   exit 1
 fi
