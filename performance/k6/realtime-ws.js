@@ -31,7 +31,12 @@ export function setup() {
 }
 
 export default function (data) {
-  const response = ws.connect(`${wsBaseUrl}/realtime/v1/ws?access_token=${encodeURIComponent(data.token)}`, {}, (socket) => {
+  // The realtime gateway enforces an explicit browser Origin allowlist.
+  // k6 is not a browser and does not add this header by default.
+  const origin = __ENV.WS_ORIGIN || 'http://localhost:3000';
+  const response = ws.connect(`${wsBaseUrl}/realtime/v1/ws?access_token=${encodeURIComponent(data.token)}`, {
+    headers: { Origin: origin },
+  }, (socket) => {
     socket.setTimeout(() => socket.close(), Number(__ENV.WS_HOLD_MS || 5000));
   });
 
