@@ -104,6 +104,16 @@ jobs:
             -e WS_HOLD_MS='${{ steps.profile.outputs.ws_hold_ms }}' \
             "$K6_IMAGE" run performance/k6/realtime-ws.js
 
+      - name: Bulk import staging throughput (disposable stack only)
+        run: |
+          docker run --rm --network host \
+            -v "$PWD:/work" -w /work \
+            -e BASE_URL=http://localhost:3000 \
+            -e IMPORT_BENCHMARK_ALLOW_STAGING=1 \
+            -e IMPORT_ROWS=1000 \
+            -e IMPORT_ITERATIONS=1 \
+            "$K6_IMAGE" run performance/k6/import-stage.js
+
       - name: Dump service logs on failure
         if: failure()
         run: docker compose -f infra/docker-compose.yml logs --no-color --tail=500
