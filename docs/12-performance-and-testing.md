@@ -83,6 +83,27 @@ Thresholds:
 
 These numbers are a regression budget for GitHub-hosted runners, not a claim about production maximum capacity. Higher-scale 1k-10k WebSocket tests should run on dedicated load generators so the generator does not become the bottleneck.
 
+## Import staging throughput (PR #29 reconciliation)
+
+The `performance/k6/import-stage.js` check is a focused, safer port of the
+staging benchmark from PR #29. It exercises admin-authenticated upload and
+the asynchronous `PREVIEW_READY` transition for 1,000 student records.
+It **does not call `/commit`** or modify the academic business tables,
+but it creates import-job staging rows in the database.
+
+Safety gates:
+
+- Only `localhost` / `127.0.0.1` application URLs are accepted.
+- `IMPORT_BENCHMARK_ALLOW_STAGING=1` must be explicitly set.
+- Row count is capped at 5,000; iterations capped at 2.
+- The CI run uses an isolated Compose database that is deleted after tests.
+- Never point this scenario at a real school database. The supplied
+  `PERF_EMAIL` and `PERF_PASSWORD` refer to the seeded local admin only.
+
+The older PR #29 contains additional diagnostic scripts (`db-sanity.sh`,
+`outbox-drain.sh`, `run.sh`) that still require independent contract and
+cleanup review before any port. This does not authorize merging #29 as-is.
+
 ## Concurrency correctness
 
 Performance without correctness is not acceptable. The normal Java integration suite includes a real transaction race for parent-meeting slot booking:
