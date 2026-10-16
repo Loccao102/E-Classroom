@@ -76,17 +76,34 @@ export default function run(data) {
   const prefix = `P${unique.replace(/\D/g, '').slice(-10)}`;
   const csv = fixture(prefix);
   const started = Date.now();
-  const staged = http.post(
-    `${baseUrl}/api/v1/schools/${data.schoolId}/imports?type=STUDENT`,
-    { file: http.file(csv, `students-${unique}.csv`, 'text/csv') },
-    { headers: headers(data.token, unique, { 'Idempotency-Key': `perf-stage-${unique}` }) }
-  );
+  const stageUrl = `${baseUrl}/api/v1/schools/${data.schoolId}/imports?type=STUDENT`;
+  const stageHeaders = headers(data.token, unique, {
+    'Idempotency-Key': `perf-stage-${unique}`,
+  });
+  const uploadPayload = () => ({
+    file: http.file(csv, `students-${unique}.csv`, 'text/csv'),
+  });
+  const staged = http.post(stageUrl, uploadPayload(), { headers: stageHeaders });
   if (!check(staged, { 'stage created': r => r.status === 200 })) {
     failureRate.add(true);
     return;
   }
   const jobId = staged.json('jobId');
   if (!jobId) {
+    failureRate.add(true);
+    return;
+  }
+  // Repeating the exact upload/key must never enqueue a second import job.
+  // This exercises the same optimistic/idempotent boundary operators use
+  // after timeouts, without ever calling the commit endpoint.
+  const replay = http.post(stageUrl, uploadPayload(), { headers: stageHeaders });
+  const replayOk = replay.status === 200 &&
+    replay.json('jobId') === jobId &&
+    replay.json('idempotentReplay') === true;
+  check({ replayOk }, {
+    'same payload and idempotency key replay the original staging job': value => value.replayOk,
+  });
+  if (!replayOk) {
     failureRate.add(true);
     return;
   }
