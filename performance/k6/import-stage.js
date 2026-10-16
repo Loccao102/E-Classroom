@@ -92,6 +92,7 @@ export default function run(data) {
   }
 
   let status = '';
+  let preview = null;
   for (let i = 0; i < polls; i++) {
     sleep(interval);
     const response = http.get(
@@ -103,11 +104,28 @@ export default function run(data) {
       return;
     }
     status = response.json('status');
-    if (['PREVIEW_READY', 'FAILED', 'VALIDATION_FAILED', 'COMMITTED'].includes(status)) break;
+    if (['PREVIEW_READY', 'FAILED', 'VALIDATION_FAILED', 'COMMITTED'].includes(status)) {
+      preview = response.json();
+      break;
+    }
   }
-  // Never call the commit API. Preview must not modify academic tables.
-  const ok = status === 'PREVIEW_READY';
+  // A PREVIEW_READY flag without the expected totals is not a successful
+  // import test. Confirm all rows were validated, no rows were rejected,
+  // and the job was never committed to academic business tables.
+  const ok = status === 'PREVIEW_READY' &&
+    preview !== null &&
+    preview.totalRows === rows &&
+    preview.validRows === rows &&
+    preview.invalidRows === 0 &&
+    !preview.committedAt;
   failureRate.add(!ok);
-  check({ status }, { 'import reaches preview without committing': v => v.status === 'PREVIEW_READY' });
+  check({ ok, status, preview }, {
+    'all staged student rows are validated without committing': value => value.ok,
+  });
+  if (!ok) {
+    console.error(
+      `Import preview integrity failed: status=${status}, totalRows=${preview?.totalRows}, validRows=${preview?.validRows}, invalidRows=${preview?.invalidRows}, committed=${Boolean(preview?.committedAt)}`
+    );
+  }
   processingMs.add(Date.now() - started, { rows: String(rows) });
 }
