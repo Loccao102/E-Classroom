@@ -65,8 +65,8 @@ class BulkImportIdempotencyIntegrationTest {
     }
 
     private static MockMultipartFile file(String name) {
-        String csv = "student_code,full_name,date_of_birth,gender,email\\n"
-                + "S001," + name + ",2012-01-01,M,test@example.com\\n";
+        String csv = "student_code,full_name,date_of_birth,gender,email\n"
+                + "S001," + name + ",2012-01-01,M,test@example.com\n";
         return new MockMultipartFile("file", "students.csv", "text/csv",
                 csv.getBytes(StandardCharsets.UTF_8));
     }
