@@ -93,6 +93,34 @@ class BulkImportIdempotencyIntegrationTest {
     }
 
     @Test
+    void simultaneousDifferentPayloadsDoNotOverwriteOrReturnServerError() throws Exception {
+        String key = "conflicting-race-" + UUID.randomUUID();
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch go = new CountDownLatch(1);
+        try (var pool = Executors.newFixedThreadPool(2)) {
+            var a = pool.submit(() -> raceStageOutcome(ready, go, key, "Student A"));
+            var b = pool.submit(() -> raceStageOutcome(ready, go, key, "Student B"));
+            assertTrue(ready.await(10, TimeUnit.SECONDS));
+            go.countDown();
+            var results = List.of(a.get(20, TimeUnit.SECONDS), b.get(20, TimeUnit.SECONDS));
+            assertEquals(1, results.stream().filter(outcome -> outcome.startsWith("job:")).count());
+            assertEquals(1, results.stream().filter("IDEMPOTENCY_KEY_REUSED"::equals).count());
+            assertEquals(1, jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM integration.import_jobs WHERE school_id=? AND idempotency_key=?",
+                    Integer.class, schoolId, key));
+        }
+    }
+
+    private static String raceStageOutcome(
+            CountDownLatch ready, CountDownLatch go, String key, String name) throws InterruptedException {
+        try {
+            return "job:" + stageWhenReleased(ready, go, key, name).jobId();
+        } catch (ApiException ex) {
+            return ex.code();
+        }
+    }
+
+    @Test
     void reusedKeyWithDifferentPayloadStillConflicts() {
         String key = "payload-" + UUID.randomUUID();
         var first = tx.execute(status -> imports.stage(schoolId, adminId, "STUDENT", key, file("Student A")));
