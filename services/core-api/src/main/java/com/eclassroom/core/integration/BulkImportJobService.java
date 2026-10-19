@@ -56,16 +56,29 @@ public class BulkImportJobService {
         String format=format(fileName); byte[] bytes;
         try{bytes=file.getBytes();}catch(Exception ex){throw ApiException.badRequest("IMPORT_FILE_READ_FAILED","Cannot read import file");}
         String digest=sha256(bytes);
-        List<Map<String,Object>> existing=jdbc.queryForList("SELECT id,status,source_sha256,import_type FROM integration.import_jobs WHERE school_id=? AND idempotency_key=?",schoolId,idempotencyKey.trim());
-        if(!existing.isEmpty()){
-            Map<String,Object> row=existing.getFirst();
-            if(!digest.equals(row.get("source_sha256"))||!importType.equals(row.get("import_type")))
-                throw ApiException.conflict("IDEMPOTENCY_KEY_REUSED","Idempotency key already belongs to another import payload");
-            return new StageResult((UUID)row.get("id"),String.valueOf(row.get("status")),true);
-        }
+        String key=idempotencyKey.trim();
+        List<Map<String,Object>> existing=jdbc.queryForList("SELECT id,status,source_sha256,import_type FROM integration.import_jobs WHERE school_id=? AND idempotency_key=?",schoolId,key);
+        if(!existing.isEmpty()) return replayStage(existing.getFirst(),digest,importType);
+
         UUID id=UUID.randomUUID();
-        jdbc.update("INSERT INTO integration.import_jobs(id,school_id,import_type,source_format,source_file_name,source_sha256,idempotency_key,status,source_blob,created_by) VALUES (?,?,?,?,?,?,?,'QUEUED',?,?)",id,schoolId,importType,format,safeFileName(fileName),digest,idempotencyKey.trim(),bytes,actor);
-        return new StageResult(id,"QUEUED",false);
+        // Concurrent retries may both see no row above. PostgreSQL's unique
+        // constraint serializes the insert; the loser must return the winning
+        // job rather than leak a constraint exception as HTTP 500.
+        int inserted=jdbc.update("INSERT INTO integration.import_jobs(id,school_id,import_type,source_format,source_file_name,source_sha256,idempotency_key,status,source_blob,created_by) VALUES (?,?,?,?,?,?,?,'QUEUED',?,?) ON CONFLICT (school_id,idempotency_key) DO NOTHING",
+                id,schoolId,importType,format,safeFileName(fileName),digest,key,bytes,actor);
+        if(inserted==1) return new StageResult(id,"QUEUED",false);
+
+        List<Map<String,Object>> winner=jdbc.queryForList(
+                "SELECT id,status,source_sha256,import_type FROM integration.import_jobs WHERE school_id=? AND idempotency_key=?",
+                schoolId,key);
+        if(winner.isEmpty()) throw new IllegalStateException("Concurrent import job was not visible after conflict");
+        return replayStage(winner.getFirst(),digest,importType);
+    }
+
+    private StageResult replayStage(Map<String,Object> existing,String digest,String importType){
+        if(!digest.equals(existing.get("source_sha256"))||!importType.equals(existing.get("import_type")))
+            throw ApiException.conflict("IDEMPOTENCY_KEY_REUSED","Idempotency key already belongs to another import payload");
+        return new StageResult((UUID)existing.get("id"),String.valueOf(existing.get("status")),true);
     }
 
     @Transactional
