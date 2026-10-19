@@ -57,8 +57,8 @@ public class BulkImportJobService {
         try{bytes=file.getBytes();}catch(Exception ex){throw ApiException.badRequest("IMPORT_FILE_READ_FAILED","Cannot read import file");}
         String digest=sha256(bytes);
         String key=idempotencyKey.trim();
-        List<Map<String,Object>> existing=jdbc.queryForList("SELECT id,status,source_sha256,import_type FROM integration.import_jobs WHERE school_id=? AND idempotency_key=?",schoolId,key);
-        if(!existing.isEmpty()) return replayStage(existing.getFirst(),digest,importType);
+        List<Map<String,Object>> existing=jdbc.queryForList("SELECT id,status,source_sha256,import_type,source_format FROM integration.import_jobs WHERE school_id=? AND idempotency_key=?",schoolId,key);
+        if(!existing.isEmpty()) return replayStage(existing.getFirst(),digest,importType,format);
 
         UUID id=UUID.randomUUID();
         // Concurrent retries may both see no row above. PostgreSQL's unique
@@ -69,14 +69,18 @@ public class BulkImportJobService {
         if(inserted==1) return new StageResult(id,"QUEUED",false);
 
         List<Map<String,Object>> winner=jdbc.queryForList(
-                "SELECT id,status,source_sha256,import_type FROM integration.import_jobs WHERE school_id=? AND idempotency_key=?",
+                "SELECT id,status,source_sha256,import_type,source_format FROM integration.import_jobs WHERE school_id=? AND idempotency_key=?",
                 schoolId,key);
         if(winner.isEmpty()) throw new IllegalStateException("Concurrent import job was not visible after conflict");
-        return replayStage(winner.getFirst(),digest,importType);
+        return replayStage(winner.getFirst(),digest,importType,format);
     }
 
-    private StageResult replayStage(Map<String,Object> existing,String digest,String importType){
-        if(!digest.equals(existing.get("source_sha256"))||!importType.equals(existing.get("import_type")))
+    private StageResult replayStage(Map<String,Object> existing,String digest,String importType,String format){
+        // File bytes are not the entire parsing contract: identical bytes
+        // supplied as a different source format must not reuse the old job.
+        if(!digest.equals(existing.get("source_sha256"))
+                ||!importType.equals(existing.get("import_type"))
+                ||!format.equals(existing.get("source_format")))
             throw ApiException.conflict("IDEMPOTENCY_KEY_REUSED","Idempotency key already belongs to another import payload");
         return new StageResult((UUID)existing.get("id"),String.valueOf(existing.get("status")),true);
     }
