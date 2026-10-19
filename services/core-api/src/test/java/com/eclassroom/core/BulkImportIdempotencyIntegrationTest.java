@@ -12,6 +12,7 @@ import org.postgresql.ds.PGSimpleDataSource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -26,6 +27,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
 @Testcontainers
 class BulkImportIdempotencyIntegrationTest {
@@ -69,6 +71,22 @@ class BulkImportIdempotencyIntegrationTest {
                 + "S001," + name + ",2012-01-01,M,test@example.com\n";
         return new MockMultipartFile("file", "students.csv", "text/csv",
                 csv.getBytes(StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void uploadRejectsActualBytesOverLimitEvenIfReportedSizeIsSmall() throws Exception {
+        MultipartFile misleading = mock(MultipartFile.class);
+        when(misleading.isEmpty()).thenReturn(false);
+        when(misleading.getSize()).thenReturn(1L);
+        when(misleading.getOriginalFilename()).thenReturn("students.csv");
+        when(misleading.getBytes()).thenReturn(new byte[(int) BulkImportJobService.MAX_FILE_BYTES + 1]);
+        String key = "oversize-" + UUID.randomUUID();
+        ApiException ex = assertThrows(ApiException.class,
+                () -> tx.execute(status -> imports.stage(schoolId, adminId, "STUDENT", key, misleading)));
+        assertEquals("IMPORT_FILE_TOO_LARGE", ex.code());
+        assertEquals(0, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM integration.import_jobs WHERE school_id=? AND idempotency_key=?",
+                Integer.class, schoolId, key));
     }
 
     @Test
