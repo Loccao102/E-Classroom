@@ -105,6 +105,23 @@ class BulkImportIdempotencyIntegrationTest {
                 Integer.class, schoolId, key));
     }
 
+    @Test
+    void reusedKeyWithIdenticalBytesButDifferentFormatStillConflicts() throws Exception {
+        String key = "format-" + UUID.randomUUID();
+        MockMultipartFile csv = file("Student A");
+        MockMultipartFile mislabeledXlsx = new MockMultipartFile(
+                "file", "students.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                csv.getBytes());
+        var first = tx.execute(status -> imports.stage(schoolId, adminId, "STUDENT", key, csv));
+        assertNotNull(first);
+        ApiException thrown = assertThrows(ApiException.class,
+                () -> tx.execute(status -> imports.stage(schoolId, adminId, "STUDENT", key, mislabeledXlsx)));
+        assertEquals("IDEMPOTENCY_KEY_REUSED", thrown.code());
+        assertEquals(first.jobId(), jdbc.queryForObject(
+                "SELECT id FROM integration.import_jobs WHERE school_id=? AND idempotency_key=?",
+                UUID.class, schoolId, key));
+    }
+
     private static BulkImportJobService.StageResult stageWhenReleased(
             CountDownLatch ready, CountDownLatch go, String key, String name) throws InterruptedException {
         ready.countDown();
