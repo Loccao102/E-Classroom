@@ -74,6 +74,23 @@ class BulkImportIdempotencyIntegrationTest {
     }
 
     @Test
+    void stagingStoresOnlyBasenameRatherThanClientMachinePath() {
+        byte[] csv = file("Student A").getBytes();
+        for (String suppliedName : List.of(
+                "C:\\Users\\Teacher\\Documents\\students.csv",
+                "../../home/teacher/private/students.csv")) {
+            String key = "filename-" + UUID.randomUUID();
+            var upload = new MockMultipartFile("file", suppliedName, "text/csv", csv);
+            var staged = tx.execute(status ->
+                    imports.stage(schoolId, adminId, "STUDENT", key, upload));
+            assertNotNull(staged);
+            assertEquals("students.csv", jdbc.queryForObject(
+                    "SELECT source_file_name FROM integration.import_jobs WHERE id=?",
+                    String.class, staged.jobId()));
+        }
+    }
+
+    @Test
     void uploadRejectsEmptyBytesEvenIfMultipartClaimsNonempty() throws Exception {
         MultipartFile misleading = mock(MultipartFile.class);
         when(misleading.isEmpty()).thenReturn(false);
