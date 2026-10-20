@@ -55,8 +55,10 @@ public class BulkImportJobService {
         String fileName=file.getOriginalFilename()==null?"import":file.getOriginalFilename();
         String format=format(fileName); byte[] bytes;
         try{bytes=file.getBytes();}catch(Exception ex){throw ApiException.badRequest("IMPORT_FILE_READ_FAILED","Cannot read import file");}
-        // getSize() is a transport hint; validate the actual in-memory bytes
-        // too before hashing, persisting, or replaying an idempotent upload.
+        // getSize() and isEmpty() are transport hints. Check the actual
+        // payload before persisting a job or accepting an idempotent replay.
+        if(bytes.length==0)
+            throw ApiException.badRequest("IMPORT_FILE_REQUIRED","Import file is required");
         if(bytes.length>MAX_FILE_BYTES)
             throw ApiException.badRequest("IMPORT_FILE_TOO_LARGE","Import file must be 5 MB or smaller");
         String digest=sha256(bytes);
