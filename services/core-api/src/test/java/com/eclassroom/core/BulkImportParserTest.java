@@ -11,7 +11,6 @@ import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BulkImportParserTest {
     private final BulkImportParser parser = new BulkImportParser();
@@ -38,14 +37,14 @@ class BulkImportParserTest {
 
     @Test
     void csvRejectsThe5001stDataRowButAcceptsExactly5000() {
-        StringBuilder source = new StringBuilder("student_code,full_name\\n");
+        StringBuilder source = new StringBuilder("student_code,full_name\n");
         for (int i = 0; i < BulkImportParser.MAX_ROWS; i++)
-            source.append("S").append(i).append(",Pupil ").append(i).append('\\n');
+            source.append("S").append(i).append(",Pupil ").append(i).append('\n');
 
         var exactlyAtLimit = parser.parse("CSV", source.toString().getBytes(StandardCharsets.UTF_8));
         assertEquals(BulkImportParser.MAX_ROWS, exactlyAtLimit.size());
 
-        source.append("S5000,Too many\\n");
+        source.append("S5000,Too many\n");
         ApiException ex = assertThrows(ApiException.class,
                 () -> parser.parse("CSV", source.toString().getBytes(StandardCharsets.UTF_8)));
         assertEquals("IMPORT_TOO_MANY_ROWS", ex.code());
@@ -53,10 +52,10 @@ class BulkImportParserTest {
 
     @Test
     void csvBlankRowsDoNotCountTowardTheLimit() {
-        StringBuilder source = new StringBuilder("student_code,full_name\\n");
+        StringBuilder source = new StringBuilder("student_code,full_name\n");
         for (int i = 0; i < BulkImportParser.MAX_ROWS; i++) {
-            source.append("S").append(i).append(",Pupil ").append(i).append('\\n');
-            if (i % 2 == 0) source.append(",\\n");
+            source.append("S").append(i).append(",Pupil ").append(i).append('\n');
+            if (i % 2 == 0) source.append(",\n");
         }
         assertEquals(BulkImportParser.MAX_ROWS,
                 parser.parse("CSV", source.toString().getBytes(StandardCharsets.UTF_8)).size());
