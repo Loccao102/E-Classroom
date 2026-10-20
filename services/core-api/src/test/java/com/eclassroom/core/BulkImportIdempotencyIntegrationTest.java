@@ -106,6 +106,36 @@ class BulkImportIdempotencyIntegrationTest {
     }
 
     @Test
+    void idempotencyKeysAreIsolatedBetweenSchools() {
+        UUID anotherSchoolId = UUID.randomUUID();
+        String code = "IS-" + anotherSchoolId.toString().substring(0, 8);
+        jdbc.update("INSERT INTO school.schools(id,code,name) VALUES (?,?,?)",
+                anotherSchoolId, code, "Second Import School");
+        jdbc.update("INSERT INTO identity.school_memberships(user_id,school_id,role,status) VALUES (?,?, 'SCHOOL_ADMIN','ACTIVE')",
+                adminId, anotherSchoolId);
+
+        String key = "shared-cross-school-" + UUID.randomUUID();
+        var first = tx.execute(status ->
+                imports.stage(schoolId, adminId, "STUDENT", key, file("Student A")));
+        var second = tx.execute(status ->
+                imports.stage(anotherSchoolId, adminId, "STUDENT", key, file("Student B")));
+        assertNotNull(first);
+        assertNotNull(second);
+        assertNotEquals(first.jobId(), second.jobId());
+        assertFalse(first.idempotentReplay());
+        assertFalse(second.idempotentReplay());
+        assertEquals(2, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM integration.import_jobs WHERE idempotency_key=?",
+                Integer.class, key));
+
+        var replayFirst = tx.execute(status ->
+                imports.stage(schoolId, adminId, "STUDENT", key, file("Student A")));
+        assertNotNull(replayFirst);
+        assertEquals(first.jobId(), replayFirst.jobId());
+        assertTrue(replayFirst.idempotentReplay());
+    }
+
+    @Test
     void simultaneousIdenticalStageRequestsShareOneJob() throws Exception {
         String key = "race-" + UUID.randomUUID();
         CountDownLatch ready = new CountDownLatch(2);
