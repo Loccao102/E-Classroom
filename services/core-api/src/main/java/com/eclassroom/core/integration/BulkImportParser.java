@@ -59,6 +59,10 @@ public class BulkImportParser {
                 Map<String, String> values = new LinkedHashMap<>();
                 for (String header : rawHeaders.keySet()) values.put(normalizeHeader(header), record.isMapped(header) ? record.get(header).trim() : "");
                 if (values.values().stream().allMatch(String::isBlank)) continue;
+                // Reject oversized CSVs while streaming, before accumulating
+                // an unbounded number of parsed row maps in memory.
+                if (result.size() >= MAX_ROWS)
+                    throw ApiException.badRequest("IMPORT_TOO_MANY_ROWS", "Import files may contain at most 5000 data rows");
                 result.add(new RawRow((int) record.getRecordNumber() + 1, values));
             }
             return result;
@@ -90,7 +94,11 @@ public class BulkImportParser {
                     values.put(headers.get(c), value);
                     if (!value.isBlank()) blank = false;
                 }
-                if (!blank) result.add(new RawRow(r + 1, values));
+                if (!blank) {
+                    if (result.size() >= MAX_ROWS)
+                        throw ApiException.badRequest("IMPORT_TOO_MANY_ROWS", "Import files may contain at most 5000 data rows");
+                    result.add(new RawRow(r + 1, values));
+                }
             }
             return result;
         }

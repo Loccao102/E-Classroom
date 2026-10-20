@@ -55,17 +55,40 @@ public class BulkImportJobService {
         String fileName=file.getOriginalFilename()==null?"import":file.getOriginalFilename();
         String format=format(fileName); byte[] bytes;
         try{bytes=file.getBytes();}catch(Exception ex){throw ApiException.badRequest("IMPORT_FILE_READ_FAILED","Cannot read import file");}
+        // getSize() and isEmpty() are transport hints. Check the actual
+        // payload before persisting a job or accepting an idempotent replay.
+        if(bytes.length==0)
+            throw ApiException.badRequest("IMPORT_FILE_REQUIRED","Import file is required");
+        if(bytes.length>MAX_FILE_BYTES)
+            throw ApiException.badRequest("IMPORT_FILE_TOO_LARGE","Import file must be 5 MB or smaller");
         String digest=sha256(bytes);
-        List<Map<String,Object>> existing=jdbc.queryForList("SELECT id,status,source_sha256,import_type FROM integration.import_jobs WHERE school_id=? AND idempotency_key=?",schoolId,idempotencyKey.trim());
-        if(!existing.isEmpty()){
-            Map<String,Object> row=existing.getFirst();
-            if(!digest.equals(row.get("source_sha256"))||!importType.equals(row.get("import_type")))
-                throw ApiException.conflict("IDEMPOTENCY_KEY_REUSED","Idempotency key already belongs to another import payload");
-            return new StageResult((UUID)row.get("id"),String.valueOf(row.get("status")),true);
-        }
+        String key=idempotencyKey.trim();
+        List<Map<String,Object>> existing=jdbc.queryForList("SELECT id,status,source_sha256,import_type,source_format FROM integration.import_jobs WHERE school_id=? AND idempotency_key=?",schoolId,key);
+        if(!existing.isEmpty()) return replayStage(existing.getFirst(),digest,importType,format);
+
         UUID id=UUID.randomUUID();
-        jdbc.update("INSERT INTO integration.import_jobs(id,school_id,import_type,source_format,source_file_name,source_sha256,idempotency_key,status,source_blob,created_by) VALUES (?,?,?,?,?,?,?,'QUEUED',?,?)",id,schoolId,importType,format,safeFileName(fileName),digest,idempotencyKey.trim(),bytes,actor);
-        return new StageResult(id,"QUEUED",false);
+        // Concurrent retries may both see no row above. PostgreSQL's unique
+        // constraint serializes the insert; the loser must return the winning
+        // job rather than leak a constraint exception as HTTP 500.
+        int inserted=jdbc.update("INSERT INTO integration.import_jobs(id,school_id,import_type,source_format,source_file_name,source_sha256,idempotency_key,status,source_blob,created_by) VALUES (?,?,?,?,?,?,?,'QUEUED',?,?) ON CONFLICT (school_id,idempotency_key) DO NOTHING",
+                id,schoolId,importType,format,safeFileName(fileName),digest,key,bytes,actor);
+        if(inserted==1) return new StageResult(id,"QUEUED",false);
+
+        List<Map<String,Object>> winner=jdbc.queryForList(
+                "SELECT id,status,source_sha256,import_type,source_format FROM integration.import_jobs WHERE school_id=? AND idempotency_key=?",
+                schoolId,key);
+        if(winner.isEmpty()) throw new IllegalStateException("Concurrent import job was not visible after conflict");
+        return replayStage(winner.getFirst(),digest,importType,format);
+    }
+
+    private StageResult replayStage(Map<String,Object> existing,String digest,String importType,String format){
+        // File bytes are not the entire parsing contract: identical bytes
+        // supplied as a different source format must not reuse the old job.
+        if(!digest.equals(existing.get("source_sha256"))
+                ||!importType.equals(existing.get("import_type"))
+                ||!format.equals(existing.get("source_format")))
+            throw ApiException.conflict("IDEMPOTENCY_KEY_REUSED","Idempotency key already belongs to another import payload");
+        return new StageResult((UUID)existing.get("id"),String.valueOf(existing.get("status")),true);
     }
 
     @Transactional
@@ -75,9 +98,10 @@ public class BulkImportJobService {
         jdbc.update("UPDATE integration.import_jobs SET status='PROCESSING',updated_at=NOW(),error_message=NULL WHERE id=?",jobId);
         try{
             List<BulkImportParser.RawRow> rows=parser.parse(job.format(),job.bytes());
+            BulkImportValidator.BatchContext context=validator.prepare(job.schoolId(),job.type(),rows);
             int valid=0,invalid=0; Set<String> seen=new HashSet<>(); List<BulkImportRowRepository.StagedRow> staged=new ArrayList<>(rows.size());
             for(BulkImportParser.RawRow row:rows){
-                BulkImportValidator.Validation base=validator.validate(job.schoolId(),job.type(),row.values());
+                BulkImportValidator.Validation base=validator.validate(job.schoolId(),job.type(),row.values(),context);
                 List<String> errors=new ArrayList<>(base.errors()); String key=duplicateKey(job.type(),base.normalized());
                 if(key!=null&&!seen.add(key))errors.add("Duplicate natural key in the same import file");
                 boolean ok=errors.isEmpty(); if(ok)valid++;else invalid++;
@@ -104,7 +128,13 @@ public class BulkImportJobService {
     private String duplicateKey(String type,Map<String,Object> n){return switch(type){case"STUDENT"->"student:"+value(n,"student_code");case"TEACHER"->"teacher:"+value(n,"teacher_code");case"GUARDIAN"->"guardian:"+value(n,"guardian_email");case"GUARDIAN_LINK"->"link:"+value(n,"student_code")+":"+value(n,"guardian_email");case"ENROLLMENT"->"enrollment:"+value(n,"academic_year")+":"+value(n,"classroom_code")+":"+value(n,"student_code");default->null;};}
     private String value(Map<String,Object> n,String key){Object v=n.get(key);return v==null?"":String.valueOf(v).toLowerCase(Locale.ROOT);}
     private String format(String name){String n=name.toLowerCase(Locale.ROOT);if(n.endsWith(".csv"))return"CSV";if(n.endsWith(".xlsx"))return"XLSX";throw ApiException.badRequest("UNSUPPORTED_IMPORT_FORMAT","Only .csv and .xlsx files are supported");}
-    private String safeFileName(String name){String n=name.replaceAll("[\\r\\n\\t]","_");return n.length()>255?n.substring(n.length()-255):n;}
+    private String safeFileName(String name){
+        // Multipart originalFilename may contain client-local Windows/Unix paths.
+        // Persist only the basename; never expose workstation directories.
+        String normalized=name.replace('\\','/');
+        String n=normalized.substring(normalized.lastIndexOf('/')+1).replaceAll("[\\r\\n\\t]","_");
+        return n.length()>255?n.substring(n.length()-255):n;
+    }
     private String sha256(byte[] bytes){try{return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));}catch(Exception ex){throw new IllegalStateException(ex);}}
     private String write(Object value){try{return json.writeValueAsString(value);}catch(Exception ex){throw new IllegalStateException(ex);}}
     private Map<String,Object> readMap(String value){try{return json.readValue(value,new TypeReference<Map<String,Object>>(){});}catch(Exception ex){throw new IllegalStateException(ex);}}

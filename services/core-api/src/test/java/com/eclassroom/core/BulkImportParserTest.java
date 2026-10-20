@@ -1,6 +1,7 @@
 package com.eclassroom.core;
 
 import com.eclassroom.core.integration.BulkImportParser;
+import com.eclassroom.core.shared.api.ApiException;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.junit.jupiter.api.Test;
@@ -32,6 +33,49 @@ class BulkImportParserTest {
         }
         var rows=parser.parse("XLSX",bytes);
         assertEquals("HS002",rows.getFirst().values().get("student_code"));
+    }
+
+    @Test
+    void csvRejectsThe5001stDataRowButAcceptsExactly5000() {
+        StringBuilder source = new StringBuilder("student_code,full_name\n");
+        for (int i = 0; i < BulkImportParser.MAX_ROWS; i++)
+            source.append("S").append(i).append(",Pupil ").append(i).append('\n');
+
+        var exactlyAtLimit = parser.parse("CSV", source.toString().getBytes(StandardCharsets.UTF_8));
+        assertEquals(BulkImportParser.MAX_ROWS, exactlyAtLimit.size());
+
+        source.append("S5000,Too many\n");
+        ApiException ex = assertThrows(ApiException.class,
+                () -> parser.parse("CSV", source.toString().getBytes(StandardCharsets.UTF_8)));
+        assertEquals("IMPORT_TOO_MANY_ROWS", ex.code());
+    }
+
+    @Test
+    void csvBlankRowsDoNotCountTowardTheLimit() {
+        StringBuilder source = new StringBuilder("student_code,full_name\n");
+        for (int i = 0; i < BulkImportParser.MAX_ROWS; i++) {
+            source.append("S").append(i).append(",Pupil ").append(i).append('\n');
+            if (i % 2 == 0) source.append(",\n");
+        }
+        assertEquals(BulkImportParser.MAX_ROWS,
+                parser.parse("CSV", source.toString().getBytes(StandardCharsets.UTF_8)).size());
+    }
+
+    @Test
+    void xlsxRejectsThe5001stNonblankRow() throws Exception {
+        byte[] bytes;
+        try (Workbook workbook = new XSSFWorkbook();
+             ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            var sheet = workbook.createSheet("Students");
+            sheet.createRow(0).createCell(0).setCellValue("student_code");
+            for (int i = 1; i <= BulkImportParser.MAX_ROWS + 1; i++) {
+                sheet.createRow(i).createCell(0).setCellValue("S" + i);
+            }
+            workbook.write(out);
+            bytes = out.toByteArray();
+        }
+        ApiException ex = assertThrows(ApiException.class, () -> parser.parse("XLSX", bytes));
+        assertEquals("IMPORT_TOO_MANY_ROWS", ex.code());
     }
 
     @Test

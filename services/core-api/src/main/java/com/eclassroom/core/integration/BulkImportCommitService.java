@@ -53,18 +53,44 @@ public class BulkImportCommitService {
         List<RowData> rows = jdbc.query(
                 "SELECT id,normalized_data::text FROM integration.import_rows WHERE job_id=? AND status='VALID' ORDER BY row_number",
                 (rs, i) -> new RowData(rs.getObject(1, UUID.class), read(rs.getString(2))), jobId);
-        int committed = 0;
-        for (RowData row : rows) {
-            UUID entityId = writer.apply(schoolId, job.type(), row.data());
-            jdbc.update("UPDATE integration.import_rows SET status='COMMITTED',committed_entity_id=? WHERE id=?", entityId, row.id());
-            committed++;
+
+        int committed;
+        if (writer.supportsBatch(job.type())) {
+            writer.applyBatch(schoolId, job.type(), rows.stream().map(RowData::data).toList());
+            committed = markBatchCommitted(job.type(), schoolId, jobId);
+            if (committed != rows.size())
+                throw new IllegalStateException("Batch import committed " + committed + " rows but expected " + rows.size());
+        } else {
+            committed = 0;
+            for (RowData row : rows) {
+                UUID entityId = writer.apply(schoolId, job.type(), row.data());
+                jdbc.update("UPDATE integration.import_rows SET status='COMMITTED',committed_entity_id=? WHERE id=?", entityId, row.id());
+                committed++;
+            }
         }
+
         jdbc.update(
                 "UPDATE integration.import_jobs SET status='COMMITTED',committed_by=?,committed_at=NOW(),version=version+1,updated_at=NOW() WHERE id=?",
                 actor, jobId);
         audit.append(schoolId, actor, "COMMIT", "IMPORT_JOB", jobId, null,
                 Map.of("importType", job.type(), "rows", committed), null);
         return new CommitResult(jobId, committed, false);
+    }
+
+    private int markBatchCommitted(String type, UUID schoolId, UUID jobId) {
+        return switch (type) {
+            case "STUDENT" -> jdbc.update(
+                    "UPDATE integration.import_rows r SET status='COMMITTED',committed_entity_id=s.id " +
+                            "FROM academic.students s WHERE r.job_id=? AND r.status='VALID' AND s.school_id=? " +
+                            "AND s.student_code=r.normalized_data->>'student_code'",
+                    jobId, schoolId);
+            case "TEACHER" -> jdbc.update(
+                    "UPDATE integration.import_rows r SET status='COMMITTED',committed_entity_id=t.id " +
+                            "FROM academic.teachers t WHERE r.job_id=? AND r.status='VALID' AND t.school_id=? " +
+                            "AND t.teacher_code=r.normalized_data->>'teacher_code'",
+                    jobId, schoolId);
+            default -> throw new IllegalStateException("Unsupported batch import type: " + type);
+        };
     }
 
     private Map<String, Object> read(String value) {
