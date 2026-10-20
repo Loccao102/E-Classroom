@@ -74,7 +74,7 @@ class BulkImportIdempotencyIntegrationTest {
     }
 
     @Test
-    void stagingStoresOnlyBasenameRatherThanClientMachinePath() {
+    void stagingStoresOnlyBasenameRatherThanClientMachinePath() throws Exception {
         byte[] csv = file("Student A").getBytes();
         for (String suppliedName : List.of(
                 "C:\\Users\\Teacher\\Documents\\students.csv",
