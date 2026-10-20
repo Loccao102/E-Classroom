@@ -128,7 +128,13 @@ public class BulkImportJobService {
     private String duplicateKey(String type,Map<String,Object> n){return switch(type){case"STUDENT"->"student:"+value(n,"student_code");case"TEACHER"->"teacher:"+value(n,"teacher_code");case"GUARDIAN"->"guardian:"+value(n,"guardian_email");case"GUARDIAN_LINK"->"link:"+value(n,"student_code")+":"+value(n,"guardian_email");case"ENROLLMENT"->"enrollment:"+value(n,"academic_year")+":"+value(n,"classroom_code")+":"+value(n,"student_code");default->null;};}
     private String value(Map<String,Object> n,String key){Object v=n.get(key);return v==null?"":String.valueOf(v).toLowerCase(Locale.ROOT);}
     private String format(String name){String n=name.toLowerCase(Locale.ROOT);if(n.endsWith(".csv"))return"CSV";if(n.endsWith(".xlsx"))return"XLSX";throw ApiException.badRequest("UNSUPPORTED_IMPORT_FORMAT","Only .csv and .xlsx files are supported");}
-    private String safeFileName(String name){String n=name.replaceAll("[\\r\\n\\t]","_");return n.length()>255?n.substring(n.length()-255):n;}
+    private String safeFileName(String name){
+        // Multipart originalFilename may contain client-local Windows/Unix paths.
+        // Persist only the basename; never expose workstation directories.
+        String normalized=name.replace('\\','/');
+        String n=normalized.substring(normalized.lastIndexOf('/')+1).replaceAll("[\\r\\n\\t]","_");
+        return n.length()>255?n.substring(n.length()-255):n;
+    }
     private String sha256(byte[] bytes){try{return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));}catch(Exception ex){throw new IllegalStateException(ex);}}
     private String write(Object value){try{return json.writeValueAsString(value);}catch(Exception ex){throw new IllegalStateException(ex);}}
     private Map<String,Object> readMap(String value){try{return json.readValue(value,new TypeReference<Map<String,Object>>(){});}catch(Exception ex){throw new IllegalStateException(ex);}}
