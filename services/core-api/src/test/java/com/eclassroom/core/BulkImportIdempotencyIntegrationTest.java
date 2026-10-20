@@ -74,6 +74,22 @@ class BulkImportIdempotencyIntegrationTest {
     }
 
     @Test
+    void uploadRejectsEmptyBytesEvenIfMultipartClaimsNonempty() throws Exception {
+        MultipartFile misleading = mock(MultipartFile.class);
+        when(misleading.isEmpty()).thenReturn(false);
+        when(misleading.getSize()).thenReturn(42L);
+        when(misleading.getOriginalFilename()).thenReturn("students.csv");
+        when(misleading.getBytes()).thenReturn(new byte[0]);
+        String key = "empty-payload-" + UUID.randomUUID();
+        ApiException ex = assertThrows(ApiException.class,
+                () -> tx.execute(status -> imports.stage(schoolId, adminId, "STUDENT", key, misleading)));
+        assertEquals("IMPORT_FILE_REQUIRED", ex.code());
+        assertEquals(0, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM integration.import_jobs WHERE school_id=? AND idempotency_key=?",
+                Integer.class, schoolId, key));
+    }
+
+    @Test
     void uploadRejectsActualBytesOverLimitEvenIfReportedSizeIsSmall() throws Exception {
         MultipartFile misleading = mock(MultipartFile.class);
         when(misleading.isEmpty()).thenReturn(false);
