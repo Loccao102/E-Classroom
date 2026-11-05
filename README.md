@@ -232,3 +232,12 @@ The final job builds the complete Docker Compose stack, waits for Nginx, authent
 - Khi hàng chờ gửi đầy, dùng cờ atomic để chỉ lên lịch **một** lần dọn dẹp cho mỗi socket chậm, gom danh sách trong một goroutine thay vì tạo một goroutine trên mỗi event bị tắc.
 - Các thao tác cập nhật/xóa presence trên Redis có deadline tối đa hai giây, tránh tác động kéo dài từ Redis lỗi đến shutdown kết nối.
 - Kiểm thử WebSocket handshake và xử lý hàng chờ gửi đầy. Không đổi message schema, xác thực JWT hoặc routing. Những thay đổi này chưa thay thế bài load test số kết nối lớn trong các PR hiệu năng đang được đánh giá.
+
+## Tối ưu refresh token khi nhiều API gọi đồng thời
+
+Frontend dùng một refresh-gate cho từng tab để gộp các request trả HTTP 401 vào cùng **một** lượt refresh, giảm tạo request dư và tránh dùng lại refresh token đã bị rotation. Nếu request khác vừa cập nhật access token trong cùng phiên, lần gọi này tái sử dụng access token mới mà không gửi thêm refresh.
+
+- Khi đăng nhập hoặc đăng xuất trong lúc refresh đang chạy, phản hồi cũ **không được ghi ngược** lên phiên mới. Khi logout, token bị xóa tại trình duyệt ngay lập tức trước khi chờ API thu hồi.
+- Nếu refresh thực sự thất bại, chỉ xóa phiên có refresh token trùng với token được dùng trong request; không xóa phiên đăng nhập khác vừa thay thế.
+- Bài test Node kiểm tra 20 lượt refresh đồng thời, thay đổi tài khoản, logout, request hỏng và refresh response không hợp lệ; CI kiểm tra trước bước build web.
+- Phạm vi gộp request chỉ trong **một browser tab**. Đồng bộ refresh token quay vòng giữa nhiều tab / nhiều thiết bị vẫn cần chiến lược liên tab hoặc server session riêng; không tuyên bố giải quyết hết các trường hợp đó.
