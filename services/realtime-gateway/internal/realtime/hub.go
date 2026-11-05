@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"sync/atomic"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -13,11 +13,11 @@ import (
 )
 
 type Client struct {
-	ID     string
-	UserID string
-	Conn   *websocket.Conn
-	Send   chan []byte
-	done   chan struct{}
+	ID          string
+	UserID      string
+	Conn        *websocket.Conn
+	Send        chan []byte
+	done        chan struct{}
 	dropPending atomic.Bool
 }
 
