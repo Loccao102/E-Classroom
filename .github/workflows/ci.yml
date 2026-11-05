@@ -73,6 +73,8 @@ jobs:
           package-manager-cache: false
       - name: Install dependencies
         run: npm install --no-audit --no-fund
+      - name: Test browser session concurrency
+        run: npm test
       - name: Typecheck and build
         run: npm run build
 
