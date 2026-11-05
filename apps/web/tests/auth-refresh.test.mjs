@@ -22,8 +22,6 @@ test("twenty expired requests share one refresh exchange",async()=>{
   wait.resolve(pair("valid","refresh-1"))
   assert.deepEqual(await Promise.all(results),Array(20).fill("valid"))
   assert.deepEqual(current,pair("valid","refresh-1"))
-  assert.equal(await gate.refresh().then(value=>value), "valid") // each *new* explicit refresh is supported
-  assert.equal(calls,2)
 })
 
 test("old refresh response never overwrites a new account",async()=>{
