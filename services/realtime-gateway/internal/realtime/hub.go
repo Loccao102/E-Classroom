@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"sync/atomic"
 	"sync"
 	"time"
 
@@ -17,11 +18,13 @@ type Client struct {
 	Conn   *websocket.Conn
 	Send   chan []byte
 	done   chan struct{}
+	dropPending atomic.Bool
 }
 
 type Hub struct {
 	mu         sync.RWMutex
 	clients    map[string]map[*Client]struct{}
+	active     int
 	redis      *redis.Client
 	instanceID string
 }
@@ -39,7 +42,12 @@ func (h *Hub) Register(c *Client) {
 	if h.clients[c.UserID] == nil {
 		h.clients[c.UserID] = map[*Client]struct{}{}
 	}
+	if _, exists := h.clients[c.UserID][c]; exists {
+		h.mu.Unlock()
+		return // Avoid duplicate writer/heartbeat loops for the same socket.
+	}
 	h.clients[c.UserID][c] = struct{}{}
+	h.active++
 	h.mu.Unlock()
 
 	h.setPresence(c)
@@ -49,11 +57,14 @@ func (h *Hub) Register(c *Client) {
 
 func (h *Hub) Unregister(c *Client) {
 	h.mu.Lock()
+	removed := false
 	if set := h.clients[c.UserID]; set != nil {
 		if _, ok := set[c]; ok {
 			delete(set, c)
+			h.active--
 			close(c.Send)
 			close(c.done)
+			removed = true
 		}
 		if len(set) == 0 {
 			delete(h.clients, c.UserID)
@@ -61,34 +72,52 @@ func (h *Hub) Unregister(c *Client) {
 	}
 	h.mu.Unlock()
 
-	if h.redis != nil {
-		_ = h.redis.Del(context.Background(), h.presenceKey(c)).Err()
+	// The reader, writer, heartbeat and slow-client path may all call this.
+	// Only the first unregister performs network cleanup and closes the socket.
+	if !removed {
+		return
 	}
-	_ = c.Conn.Close()
+	if h.redis != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = h.redis.Del(ctx, h.presenceKey(c)).Err()
+		cancel()
+	}
+	if c.Conn != nil {
+		_ = c.Conn.Close()
+	}
 }
 
 func (h *Hub) Deliver(recipients []string, payload []byte) {
+	var slow []*Client
 	h.mu.RLock()
-	defer h.mu.RUnlock()
 	for _, userID := range recipients {
 		for c := range h.clients[userID] {
 			select {
 			case c.Send <- payload:
 			default:
-				go h.Unregister(c)
+				// One scheduled cleanup per socket, not one goroutine for every
+				// event that happens to find its outbound channel full.
+				if c.dropPending.CompareAndSwap(false, true) {
+					slow = append(slow, c)
+				}
 			}
 		}
+	}
+	h.mu.RUnlock()
+
+	if len(slow) > 0 {
+		go func() {
+			for _, c := range slow {
+				h.Unregister(c)
+			}
+		}()
 	}
 }
 
 func (h *Hub) Count() int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	count := 0
-	for _, set := range h.clients {
-		count += len(set)
-	}
-	return count
+	return h.active // O(1), even with thousands of connected users.
 }
 
 func (h *Hub) CloseAll() {
@@ -111,7 +140,9 @@ func (h *Hub) presenceKey(c *Client) string {
 
 func (h *Hub) setPresence(c *Client) {
 	if h.redis != nil {
-		_ = h.redis.Set(context.Background(), h.presenceKey(c), h.instanceID, 90*time.Second).Err()
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = h.redis.Set(ctx, h.presenceKey(c), h.instanceID, 90*time.Second).Err()
 	}
 }
 
