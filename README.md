@@ -224,3 +224,11 @@ The final job builds the complete Docker Compose stack, waits for Nginx, authent
 6. Consumers and retried mutations are designed for idempotency where side effects require it.
 7. File-driven mutations use staging/preview before explicit commit; uploads never write business state directly.
 8. Optimize from measurements, with bounded batches, cursor-friendly indexes and backpressure on realtime connections.
+
+## Realtime gateway — kết nối WebSocket và backpressure
+
+- Hub giữ bộ đếm client đang hoạt động theo thao tác đăng ký/gỡ kết nối, nên đọc số kết nối là O(1) thay vì duyệt tất cả user.
+- Không đăng ký lặp một socket đang ở trong Hub; các lời gọi Unregister trùng do reader/writer/heartbeat/slow-client chỉ xóa và đóng một lần.
+- Khi hàng chờ gửi đầy, dùng cờ atomic để chỉ lên lịch **một** lần dọn dẹp cho mỗi socket chậm, gom danh sách trong một goroutine thay vì tạo một goroutine trên mỗi event bị tắc.
+- Các thao tác cập nhật/xóa presence trên Redis có deadline tối đa hai giây, tránh tác động kéo dài từ Redis lỗi đến shutdown kết nối.
+- Kiểm thử WebSocket handshake và xử lý hàng chờ gửi đầy. Không đổi message schema, xác thực JWT hoặc routing. Những thay đổi này chưa thay thế bài load test số kết nối lớn trong các PR hiệu năng đang được đánh giá.
